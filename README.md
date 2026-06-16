@@ -13,15 +13,15 @@ Embed license enforcement directly into your C application in a few lines of cod
 - [Running the tests](#running-the-tests)
 - [Running the example](#running-the-example)
 - [Running the tools](#running-the-tools)
-  - [sdktest](#sdktest)
-  - [validator](#validator)
+    - [sdktest](#sdktest)
+    - [validator](#validator)
 - [API reference](#api-reference)
-  - [latte\_new](#latte_new)
-  - [latte\_activate](#latte_activate)
-  - [latte\_check](#latte_check)
-  - [latte\_license\_free / latte\_free](#latte_license_free--latte_free)
-  - [latte\_strerror](#latte_strerror)
-- [The latte\_license struct](#the-latte_license-struct)
+    - [latte_new](#latte_new)
+    - [latte_activate](#latte_activate)
+    - [latte_check](#latte_check)
+    - [latte_license_free / latte_free](#latte_license_free--latte_free)
+    - [latte_strerror](#latte_strerror)
+- [The latte_license struct](#the-latte_license-struct)
 - [Error codes](#error-codes)
 - [License types](#license-types)
 - [Offline grace period](#offline-grace-period)
@@ -36,13 +36,13 @@ Embed license enforcement directly into your C application in a few lines of cod
 
 ## Requirements
 
-| Dependency | Version | Purpose |
-|---|---|---|
-| [libsodium](https://libsodium.org) | ≥ 1.0.18 | Ed25519 signature verification, HMAC-SHA256 |
-| [libcurl](https://curl.se/libcurl/) | ≥ 7.68 | HTTPS activate / renew requests |
-| CMake | ≥ 3.15 | Build system |
-| C compiler | C11 | clang or gcc |
-| pkg-config | any | Dependency discovery |
+| Dependency                          | Version  | Purpose                                     |
+| ----------------------------------- | -------- | ------------------------------------------- |
+| [libsodium](https://libsodium.org)  | ≥ 1.0.18 | Ed25519 signature verification, HMAC-SHA256 |
+| [libcurl](https://curl.se/libcurl/) | ≥ 7.68   | HTTPS activate / renew requests             |
+| CMake                               | ≥ 3.15   | Build system                                |
+| C compiler                          | C11      | clang or gcc                                |
+| pkg-config                          | any      | Dependency discovery                        |
 
 cJSON is vendored under `vendor/cjson/` — no separate installation needed.
 
@@ -65,6 +65,17 @@ apt install libsodium-dev libcurl4-openssl-dev cmake pkg-config build-essential
 dnf install libsodium-devel libcurl-devel cmake pkgconfig gcc
 ```
 
+### Windows (MSYS2 / MinGW-w64)
+
+The build relies on `pkg-config` to locate libsodium and libcurl, which native MSVC does not provide. Install [MSYS2](https://www.msys2.org), then from the **MSYS2 MinGW64** shell:
+
+```sh
+pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-pkgconf \
+          mingw-w64-x86_64-libsodium mingw-w64-x86_64-curl
+```
+
+Run the [Building](#building) and [Running the tests](#running-the-tests) steps below from the same MinGW64 shell — `cmake`, `gcc`, and `ctest` all behave the same as on Linux/macOS. Static and shared libraries are named `liblatte.a` / `liblatte.dll`, and binaries get a `.exe` suffix.
+
 ---
 
 ## Building
@@ -78,19 +89,22 @@ cmake --build build
 
 This produces:
 
-| Artifact | Path |
-|---|---|
-| Static library | `build/liblatte.a` |
-| Shared library | `build/liblatte.dylib` (macOS) / `build/liblatte.so` (Linux) |
-| Example binary | `build/example_simple` |
-| CLI tool | `build/sdktest` |
-| CLI tool | `build/validator` |
+| Artifact       | Path                                                                                |
+| -------------- | ------------------------------------------------------------------------------------ |
+| Static library | `build/liblatte.a`                                                                    |
+| Shared library | `build/liblatte.dylib` (macOS) / `build/liblatte.so` (Linux) / `build/liblatte.dll` (Windows) |
+| Example binary | `build/example_simple` (`.exe` on Windows)                                            |
+| CLI tool       | `build/sdktest` (`.exe` on Windows)                                                   |
+| CLI tool       | `build/validator` (`.exe` on Windows)                                                 |
 
 ### Linking your application
 
 ```sh
 # Static
 cc myapp.c -Ipath/to/latte-c/include -Lbuild -llatte -lsodium -lcurl -o myapp
+
+# Windows (MSYS2 MinGW64 shell)
+gcc myapp.c -Ipath/to/latte-c/include -Lbuild -llatte -lsodium -lcurl -o myapp.exe
 
 # Or let CMake handle it via FetchContent / add_subdirectory
 ```
@@ -150,13 +164,13 @@ License activated!
 ```
 
 The hardcoded `SDK_TEST_APP_KEY` in `examples/simple.c` targets the live API.  
-Edit it to point at `pk_test_…` or `pk_local_…` for development.
+Edit it to point at `pk_test_…` for development.
 
 ---
 
 ## Running the tools
 
-Both tools connect to a running LicenseLatte server. The defaults target `http://localhost:8080` (`pk_local_…`). Override via command-line arguments.
+Both tools connect to a running LicenseLatte server.
 
 ### sdktest
 
@@ -167,7 +181,7 @@ Full integration test: activate → offline check → polling loop.
 ./build/sdktest
 
 # Custom app ID and license key
-./build/sdktest pk_test_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX
+./build/sdktest pk_test_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX
 ```
 
 ```
@@ -199,7 +213,7 @@ Low-level debug tool: activate → verify JWT claims → renew. Useful for inspe
 ./build/validator
 
 # Custom arguments: app_id  license_key  machine_id
-./build/validator pk_local_AHAK85389VQYXYB6S4BW66SKE53TWVTS \
+./build/validator pk_test_AHAK85389VQYXYB6S4BW66SKE53TWVTS \
                   AHAK856T8PQS0245KDB1FEC9VXA998 \
                   test-machine-001
 ```
@@ -243,14 +257,14 @@ Creates and returns a new SDK handle. Call once at application startup and reuse
 
 **Errors:**
 
-| Code | Meaning |
-|---|---|
-| `LATTE_ERR_INVALID_APPID` | Malformed app ID (wrong prefix or structure) |
-| `LATTE_ERR_UNKNOWN_ENVIRONMENT` | Environment field is not `live`, `test`, or `local` |
-| `LATTE_ERR_INVALID_APPID_KEY_SEGMENT` | 32-char segment has the wrong length |
-| `LATTE_ERR_INVALID_APPID_CHECKSUM` | Built-in checksum mismatch — likely a typo |
-| `LATTE_ERR_STORAGE_INIT_FAILED` | Token directory could not be created |
-| `LATTE_ERR_MACHINE_ID_FAILED` | OS machine UUID is unavailable |
+| Code                                  | Meaning                                             |
+| ------------------------------------- | --------------------------------------------------- |
+| `LATTE_ERR_INVALID_APPID`             | Malformed app ID (wrong prefix or structure)        |
+| `LATTE_ERR_UNKNOWN_ENVIRONMENT`       | Environment field is not `live`, `test`, or `local` |
+| `LATTE_ERR_INVALID_APPID_KEY_SEGMENT` | 32-char segment has the wrong length                |
+| `LATTE_ERR_INVALID_APPID_CHECKSUM`    | Built-in checksum mismatch — likely a typo          |
+| `LATTE_ERR_STORAGE_INIT_FAILED`       | Token directory could not be created                |
+| `LATTE_ERR_MACHINE_ID_FAILED`         | OS machine UUID is unavailable                      |
 
 ### latte_activate
 
@@ -270,14 +284,14 @@ On `LATTE_OK`, `*out` is heap-allocated. The caller must free it with `latte_lic
 
 **Errors:**
 
-| Code | Meaning |
-|---|---|
-| `LATTE_ERR_INVALID_KEY` | Key fails format or checksum validation |
-| `LATTE_ERR_LICENSE_EXPIRED` | License is past its expiry or grace period |
-| `LATTE_ERR_SEAT_LIMIT` | All activation slots are occupied |
-| `LATTE_ERR_LICENSE_NOT_FOUND` | Key is valid but not registered on the server |
-| `LATTE_ERR_INVALID_PROJECT_KEY` | The app ID is not recognised by the server |
-| `LATTE_ERR_NETWORK` | Could not reach the API |
+| Code                             | Meaning                                        |
+| -------------------------------- | ---------------------------------------------- |
+| `LATTE_ERR_INVALID_KEY`          | Key fails format or checksum validation        |
+| `LATTE_ERR_LICENSE_EXPIRED`      | License is past its expiry or grace period     |
+| `LATTE_ERR_SEAT_LIMIT`           | All activation slots are occupied              |
+| `LATTE_ERR_LICENSE_NOT_FOUND`    | Key is valid but not registered on the server  |
+| `LATTE_ERR_INVALID_PROJECT_KEY`  | The app ID is not recognised by the server     |
+| `LATTE_ERR_NETWORK`              | Could not reach the API                        |
 | `LATTE_ERR_SERVER_INVALID_TOKEN` | Server response failed cert-chain verification |
 
 ### latte_check
@@ -385,7 +399,7 @@ int main(void)
     /* 2. Activate the key entered by the user.
      *    Returns from cache immediately if already activated on this machine. */
     latte_license *lic = NULL;
-    st = latte_activate(sdk, "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX", &lic);
+    st = latte_activate(sdk, "XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX", &lic);
     if (st != LATTE_OK) {
         switch (st) {
         case LATTE_ERR_INVALID_KEY:    fprintf(stderr, "invalid key\n");    break;
@@ -421,11 +435,11 @@ int main(void)
 
 ## License types
 
-| Type | Expiry | Renewal | Revocable |
-|---|---|---|---|
-| `perpetual_fixed` | Never (year 2099) | Never | No |
-| `perpetual` | Never | Periodic (background) | Yes |
-| `expiring` | Set by policy | Periodic (background) | Yes |
+| Type              | Expiry            | Renewal               | Revocable |
+| ----------------- | ----------------- | --------------------- | --------- |
+| `perpetual_fixed` | Never (year 2099) | Never                 | No        |
+| `perpetual`       | Never             | Periodic (background) | Yes       |
+| `expiring`        | Set by policy     | Periodic (background) | Yes       |
 
 **`perpetual_fixed`** tokens are irrevocable one-time activations. The server signs a token that expires in 2099; the SDK never contacts the API again after the first activation. There is no grace period — the token is simply valid until 2099.
 
@@ -457,11 +471,11 @@ Two cases result in expiry:
 
 Tokens are stored as a JSON record in a per-OS directory:
 
-| OS | Path |
-|---|---|
-| macOS | `~/Library/Application Support/LicenseLatte/{appkey}.latte` |
-| Linux | `~/.config/LicenseLatte/{appkey}.latte` |
-| Windows | `%AppData%\LicenseLatte\{appkey}.latte` |
+| OS      | Path                                                        |
+| ------- | ----------------------------------------------------------- |
+| macOS   | `~/Library/Application Support/LicenseLatte/{appkey}.latte` |
+| Linux   | `~/.config/LicenseLatte/{appkey}.latte`                     |
+| Windows | `%AppData%\LicenseLatte\{appkey}.latte`                     |
 
 If the OS config directory is unavailable the SDK falls back to `.licenselatte/{appkey}.latte` relative to the working directory.
 
@@ -506,11 +520,10 @@ Metadata values are always strings. They are signed by the server and cannot be 
 
 The `app_id` prefix determines which API endpoint the SDK uses:
 
-| Prefix | Endpoint | Purpose |
-|---|---|---|
-| `pk_live_` | `https://api.licenselatte.com` | Production |
+| Prefix     | Endpoint                            | Purpose      |
+| ---------- | ------------------------------------ | ------------ |
+| `pk_live_` | `https://api.licenselatte.com`      | Production   |
 | `pk_test_` | `https://test.api.licenselatte.com` | Sandbox / CI |
-| `pk_local_` | `http://localhost:8080` | Local development server |
 
 ---
 
@@ -564,4 +577,4 @@ tests/
 
 ## License
 
-MIT
+MIT, see [LICENSE](LICENSE).
