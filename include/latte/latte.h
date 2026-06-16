@@ -12,34 +12,34 @@ extern "C" {
 typedef struct latte_sdk latte_sdk;
 
 typedef enum {
-    LATTE_OK = 0,
+  LATTE_OK = 0,
 
-    /* Activation / Check errors */
-    LATTE_ERR_INVALID_KEY,
-    LATTE_ERR_LICENSE_EXPIRED,
-    LATTE_ERR_NOT_ACTIVATED,
-    LATTE_ERR_SEAT_LIMIT,
-    LATTE_ERR_LICENSE_NOT_FOUND,
-    LATTE_ERR_INVALID_PROJECT_KEY,
+  /* Activation / Check errors */
+  LATTE_ERR_INVALID_KEY,
+  LATTE_ERR_LICENSE_EXPIRED,
+  LATTE_ERR_NOT_ACTIVATED,
+  LATTE_ERR_SEAT_LIMIT,
+  LATTE_ERR_LICENSE_NOT_FOUND,
+  LATTE_ERR_INVALID_PROJECT_KEY,
 
-    /* SDK initialisation errors (latte_new) */
-    LATTE_ERR_INVALID_APPID,
-    LATTE_ERR_UNKNOWN_ENVIRONMENT,
-    LATTE_ERR_INVALID_APPID_KEY_SEGMENT,
-    LATTE_ERR_INVALID_APPID_CHECKSUM,
-    LATTE_ERR_STORAGE_INIT_FAILED,
-    LATTE_ERR_MACHINE_ID_FAILED,
+  /* SDK initialisation errors (latte_new) */
+  LATTE_ERR_INVALID_APPID,
+  LATTE_ERR_UNKNOWN_ENVIRONMENT,
+  LATTE_ERR_INVALID_APPID_KEY_SEGMENT,
+  LATTE_ERR_INVALID_APPID_CHECKSUM,
+  LATTE_ERR_STORAGE_INIT_FAILED,
+  LATTE_ERR_MACHINE_ID_FAILED,
 
-    /* Runtime errors */
-    LATTE_ERR_NETWORK,
-    LATTE_ERR_SERVER_INVALID_TOKEN,
-    LATTE_ERR_INTERNAL
+  /* Runtime errors */
+  LATTE_ERR_NETWORK,
+  LATTE_ERR_SERVER_INVALID_TOKEN,
+  LATTE_ERR_INTERNAL
 } latte_status;
 
 /* Key-value pair for license metadata (from the pmd JWT claim). */
 typedef struct {
-    char *key;
-    char *value;
+  char *key;
+  char *value;
 } latte_kv;
 
 /*
@@ -52,16 +52,16 @@ typedef struct {
  *   window has not yet elapsed — surface a "please reconnect" warning.
  */
 typedef struct {
-    char    *key;
-    char    *activation_id;
-    char    *project_id;
-    char    *license_type;
-    int64_t  issued_at;
-    int64_t  expires_at;
-    int64_t  grace_period_seconds;
-    int      in_grace_period;
-    size_t   metadata_count;
-    latte_kv *metadata;
+  char *key;
+  char *activation_id;
+  char *project_id;
+  char *license_type;
+  int64_t issued_at;
+  int64_t expires_at;
+  int64_t grace_period_seconds;
+  uint32_t in_grace_period;
+  uint32_t metadata_count;
+  latte_kv *metadata;
 } latte_license;
 
 /*
@@ -71,8 +71,9 @@ typedef struct {
  * out:    receives the new SDK handle on LATTE_OK.
  *
  * Returns LATTE_ERR_INVALID_APPID / _CHECKSUM if app_id is malformed,
- *         LATTE_ERR_STORAGE_INIT_FAILED if the token directory cannot be created,
- *         LATTE_ERR_MACHINE_ID_FAILED if the machine fingerprint cannot be read.
+ *         LATTE_ERR_STORAGE_INIT_FAILED if the token directory cannot be
+ * created, LATTE_ERR_MACHINE_ID_FAILED if the machine fingerprint cannot be
+ * read.
  */
 latte_status latte_new(const char *app_id, latte_sdk **out);
 
@@ -89,7 +90,8 @@ latte_status latte_new(const char *app_id, latte_sdk **out);
  * out receives a heap-allocated latte_license on LATTE_OK; free with
  * latte_license_free().
  */
-latte_status latte_activate(latte_sdk *sdk, const char *key, latte_license **out);
+latte_status latte_activate(latte_sdk *sdk, const char *key,
+                            latte_license **out);
 
 /*
  * latte_check — validate the locally-stored token without a network call.
