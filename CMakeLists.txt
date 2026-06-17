@@ -105,6 +105,10 @@ add_executable(validator tools/validator.c)
 target_include_directories(validator PRIVATE include src)
 target_link_libraries(validator PRIVATE latte_static ${LIBSODIUM_LIBRARIES})
 
+add_executable(machineid_test tools/machineid_test.c)
+target_include_directories(machineid_test PRIVATE src)
+target_link_libraries(machineid_test PRIVATE latte_static)
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
