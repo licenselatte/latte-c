@@ -4,6 +4,9 @@ C library SDK for [LicenseLatte](https://licenselatte.com) — a port of the off
 
 Embed license enforcement directly into your C application in a few lines of code. The library handles activation, offline grace periods, background token renewal, and local token caching transparently.
 
+> [!NOTE]
+> The C library has its own version line independent of the Go SDK. The Go SDK is at 1.x with a stable API; the C library is pre-1.0 while the ABI is being finalized before a stability commitment.
+
 ---
 
 ## Table of contents
