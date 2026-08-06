@@ -1,8 +1,11 @@
 cmake_minimum_required(VERSION 3.15)
-project(latte-c VERSION 0.1.0 LANGUAGES C)
+project(latte-c VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Homebrew prefix (Apple Silicon default; Intel uses /usr/local)
 if(APPLE)
@@ -94,6 +97,10 @@ add_executable(example_simple examples/simple.c)
 target_include_directories(example_simple PRIVATE include)
 target_link_libraries(example_simple PRIVATE latte_static)
 
+add_executable(example_simple_cpp examples/simple.cpp)
+target_include_directories(example_simple_cpp PRIVATE include)
+target_link_libraries(example_simple_cpp PRIVATE latte_static)
+
 # ---------------------------------------------------------------------------
 # CLI tools
 # ---------------------------------------------------------------------------
@@ -152,4 +159,4 @@ add_test(NAME jwt COMMAND test_jwt)
 # Install
 # ---------------------------------------------------------------------------
 install(TARGETS latte_static latte_shared DESTINATION lib)
-install(FILES include/latte/latte.h DESTINATION include/latte)
+install(FILES include/latte/latte.h include/latte/latte.hpp DESTINATION include/latte)

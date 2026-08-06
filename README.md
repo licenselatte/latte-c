@@ -25,6 +25,7 @@ Embed license enforcement directly into your C application in a few lines of cod
     - [latte_license_free / latte_free](#latte_license_free--latte_free)
     - [latte_strerror](#latte_strerror)
 - [The latte_license struct](#the-latte_license-struct)
+- [C++ wrapper](#c-wrapper)
 - [Error codes](#error-codes)
 - [License types](#license-types)
 - [Offline grace period](#offline-grace-period)
@@ -97,6 +98,7 @@ This produces:
 | Static library | `build/liblatte.a`                                                                    |
 | Shared library | `build/liblatte.dylib` (macOS) / `build/liblatte.so` (Linux) / `build/liblatte.dll` (Windows) |
 | Example binary | `build/example_simple` (`.exe` on Windows)                                            |
+| Example binary (C++) | `build/example_simple_cpp` (`.exe` on Windows)                                  |
 | CLI tool       | `build/sdktest` (`.exe` on Windows)                                                   |
 | CLI tool       | `build/validator` (`.exe` on Windows)                                                 |
 
@@ -379,6 +381,50 @@ typedef struct {
 
 ---
 
+## C++ wrapper
+
+A header-only RAII wrapper is available at `include/latte/latte.hpp` for C++ consumers. It wraps `latte_config` / `latte_sdk` / `latte_license` in move-only classes that free their underlying C resource automatically (destructors call `latte_config_free` / `latte_free` / `latte_license_free`), and it turns `latte_status` failures into a `latte::Error` exception instead of a return code.
+
+```cpp
+#include <iostream>
+#include <latte/latte.hpp>
+
+int main()
+{
+    try {
+        latte::Config cfg("pk_live_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX");
+        latte::Sdk sdk(cfg);
+
+        latte::License lic = sdk.activate("XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX");
+        std::cout << "activated, license type: " << lic.license_type() << "\n";
+
+        for (const auto &[key, value] : lic.metadata())
+            std::cout << key << " = " << value << "\n";
+
+        lic = sdk.check();
+        if (lic.in_grace_period())
+            std::cerr << "warning: offline too long, please reconnect soon\n";
+    } catch (const latte::Error &e) {
+        std::cerr << "error: " << e.what() << " (status " << e.status() << ")\n";
+        return 1;
+    }
+    return 0;
+}
+```
+
+| Class            | Wraps          | Notes                                                                 |
+| ----------------- | -------------- | ---------------------------------------------------------------------- |
+| `latte::Config`    | `latte_config` | Constructor takes `app_id`; `set_multi_instance(bool)` chains          |
+| `latte::Sdk`       | `latte_sdk`    | Constructor throws `latte::Error`; `activate()` / `check()` return `License` |
+| `latte::License`   | `latte_license`| Accessors (`key()`, `license_type()`, `metadata()`, …) instead of struct fields |
+| `latte::Error`     | `latte_status` | `std::runtime_error`; `.status()` returns the original `latte_status`  |
+
+All three RAII classes are move-only (no copy constructor/assignment), matching the single-owner semantics of the underlying C handles. `include/latte/latte.h` remains usable directly from C++ (it's wrapped in `extern "C"`) if you don't want the wrapper.
+
+Build the C++ example with the `example_simple_cpp` CMake target (mirrors `example_simple`, ported to use the wrapper).
+
+---
+
 ## Error codes
 
 ```c
@@ -577,7 +623,8 @@ To verify cross-SDK parity, activate with `latte-go`'s `cmd/sdktest` then run `l
 ## Architecture
 
 ```
-include/latte/latte.h          Public API
+include/latte/latte.h          Public C API
+include/latte/latte.hpp        Header-only C++ RAII wrapper (Config / Sdk / License / Error)
 src/
   latte.c                      SDK: New / Activate / Check + renewal orchestration
   appid.c                      AppID parsing, storage path resolution
@@ -598,7 +645,8 @@ src/
     file.{c,h}                 JSON token file (+ legacy timestamp:token)
     mem.{c,h}                  In-memory storage for unit tests
 vendor/cjson/                  Vendored cJSON (MIT)
-examples/simple.c              Minimal activate → check example
+examples/simple.c              Minimal activate → check example (C API)
+examples/simple.cpp            Same example, ported to the C++ wrapper
 tools/sdktest.c                Integration test: activate → check → poll
 tools/validator.c              Debug: activate → print JWT claims → renew
 tests/
