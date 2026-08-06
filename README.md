@@ -251,23 +251,46 @@ Include the single public header:
 ### latte_new
 
 ```c
-latte_status latte_new(const char *app_id, latte_sdk **out);
+typedef struct {
+  const char *app_id;
+  int         multi_instance;
+} latte_config;
+
+latte_status latte_new(const latte_config *config, latte_sdk **out);
 ```
 
 Creates and returns a new SDK handle. Call once at application startup and reuse the returned pointer for the lifetime of the process.
 
-`app_id` is the project key shown in the LicenseLatte dashboard, format `pk_{env}_{32-char}`.
+`config->app_id` is the project key shown in the LicenseLatte dashboard, format `pk_{env}_{32-char}`.
+
+```c
+latte_config cfg = { .app_id = "pk_live_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" };
+latte_sdk *sdk = NULL;
+latte_status st = latte_new(&cfg, &sdk);
+```
 
 **Errors:**
 
 | Code                                  | Meaning                                             |
-| ------------------------------------- | --------------------------------------------------- |
+| -------------------------------------- | ----------------------------------------------------- |
+| `LATTE_ERR_INVALID_CONFIG`            | `config` or `config->app_id` is `NULL`              |
 | `LATTE_ERR_INVALID_APPID`             | Malformed app ID (wrong prefix or structure)        |
 | `LATTE_ERR_UNKNOWN_ENVIRONMENT`       | Environment field is not `live`, `test`, or `local` |
 | `LATTE_ERR_INVALID_APPID_KEY_SEGMENT` | 32-char segment has the wrong length                |
 | `LATTE_ERR_INVALID_APPID_CHECKSUM`    | Built-in checksum mismatch — likely a typo          |
 | `LATTE_ERR_STORAGE_INIT_FAILED`       | Token directory could not be created                |
 | `LATTE_ERR_MACHINE_ID_FAILED`         | OS machine UUID is unavailable                      |
+
+#### Multiple licensed instances of the same app
+
+By default, one machine has a single cached token per `app_id`: only one license can be active for that app on the machine at a time, stored in the shared OS config directory. Set `multi_instance = 1` to let several independently-licensed copies of the *same* `app_id` run side by side — e.g. several portable installs of the same app, each in its own directory, each activated with a different license.
+
+```c
+latte_config cfg = { .app_id = "pk_live_...", .multi_instance = 1 };
+```
+
+The working directory itself is the instance boundary: the token is stored at `.licenselatte/{app_key}.latte` relative to the CWD instead of the shared OS config directory, which is never read or written in this mode. Give each instance its own directory (e.g. one per portable install) and they stay independent automatically — no id to generate or manage.
+
 
 ### latte_activate
 
@@ -367,6 +390,7 @@ typedef enum {
     LATTE_ERR_INVALID_PROJECT_KEY,
 
     /* SDK initialisation (latte_new) */
+    LATTE_ERR_INVALID_CONFIG,
     LATTE_ERR_INVALID_APPID,
     LATTE_ERR_UNKNOWN_ENVIRONMENT,
     LATTE_ERR_INVALID_APPID_KEY_SEGMENT,
@@ -393,7 +417,8 @@ int main(void)
 {
     /* 1. Create one SDK instance per process. */
     latte_sdk *sdk = NULL;
-    latte_status st = latte_new("pk_live_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", &sdk);
+    latte_config cfg = { .app_id = "pk_live_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" };
+    latte_status st = latte_new(&cfg, &sdk);
     if (st != LATTE_OK) {
         fprintf(stderr, "SDK init failed: %s\n", latte_strerror(st));
         return 1;
@@ -483,6 +508,8 @@ Tokens are stored as a JSON record in a per-OS directory:
 If the OS config directory is unavailable the SDK falls back to `.licenselatte/{appkey}.latte` relative to the working directory.
 
 Each project has its own file (keyed by the 32-char project key segment), so multiple products on the same machine do not interfere with each other.
+
+When `latte_config.multi_instance` is set, the OS-wide directory above is bypassed entirely: the token always lives at `.licenselatte/{appkey}.latte` relative to the working directory, so several independently-licensed instances of the same `app_id` can coexist on one machine, one per directory. See [Multiple licensed instances of the same app](#multiple-licensed-instances-of-the-same-app).
 
 The storage format is compatible with the `latte-go` SDK — tokens activated by one SDK can be read by the other.
 

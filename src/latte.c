@@ -217,9 +217,12 @@ static void maybe_start_renew(latte_sdk *sdk, const ll_license *lic)
  * Public API
  * ------------------------------------------------------------------------- */
 
-latte_status latte_new(const char *app_id, latte_sdk **out)
+latte_status latte_new(const latte_config *config, latte_sdk **out)
 {
     *out = NULL;
+    if (!config || !config->app_id) return LATTE_ERR_INVALID_CONFIG;
+    const char *app_id = config->app_id;
+
     if (sodium_init() < 0) return LATTE_ERR_INTERNAL;
 
     ll_env env;
@@ -245,7 +248,10 @@ latte_status latte_new(const char *app_id, latte_sdk **out)
     }
 
     char store_path[512];
-    if (ll_resolve_storage_path(sdk->app_key, store_path, sizeof(store_path)) < 0) {
+    int path_ok = config->multi_instance
+        ? ll_resolve_storage_path_local(sdk->app_key, store_path, sizeof(store_path))
+        : ll_resolve_storage_path(sdk->app_key, store_path, sizeof(store_path));
+    if (path_ok < 0) {
         free(sdk); return LATTE_ERR_STORAGE_INIT_FAILED;
     }
     strncpy(sdk->store_path, store_path, sizeof(sdk->store_path) - 1);

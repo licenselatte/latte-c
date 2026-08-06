@@ -23,6 +23,7 @@ typedef enum {
   LATTE_ERR_INVALID_PROJECT_KEY,
 
   /* SDK initialisation errors (latte_new) */
+  LATTE_ERR_INVALID_CONFIG,
   LATTE_ERR_INVALID_APPID,
   LATTE_ERR_UNKNOWN_ENVIRONMENT,
   LATTE_ERR_INVALID_APPID_KEY_SEGMENT,
@@ -65,17 +66,41 @@ typedef struct {
 } latte_license;
 
 /*
+ * Configuration for latte_new().
+ *
+ * app_id:         project key from the LicenseLatte dashboard, format
+ *                 pk_{env}_{32}. Required.
+ *
+ * multi_instance: normally one machine has a single cached token per app_id
+ *                 (stored in the OS config directory), so only one license
+ *                 can be active for that app at a time on the machine. Set
+ *                 this to 1 to let several independently-licensed instances
+ *                 of the *same* app_id run side by side (e.g. several
+ *                 portable installs of the same app, each in its own
+ *                 directory, each activated with a different license). The
+ *                 working directory itself is the instance boundary: the
+ *                 token is stored at `.licenselatte/{app_key}.latte`
+ *                 relative to the CWD instead of the shared OS config
+ *                 directory, which is never read or written in this mode.
+ */
+typedef struct {
+  const char *app_id;
+  int         multi_instance;
+} latte_config;
+
+/*
  * latte_new — create one SDK instance per application process.
  *
- * app_id: project key from the LicenseLatte dashboard, format pk_{env}_{32}.
+ * config: see latte_config. Not retained; may be stack-allocated.
  * out:    receives the new SDK handle on LATTE_OK.
  *
- * Returns LATTE_ERR_INVALID_APPID / _CHECKSUM if app_id is malformed,
+ * Returns LATTE_ERR_INVALID_CONFIG if config or config->app_id is NULL,
+ *         LATTE_ERR_INVALID_APPID / _CHECKSUM if app_id is malformed,
  *         LATTE_ERR_STORAGE_INIT_FAILED if the token directory cannot be
  * created, LATTE_ERR_MACHINE_ID_FAILED if the machine fingerprint cannot be
  * read.
  */
-latte_status latte_new(const char *app_id, latte_sdk **out);
+latte_status latte_new(const latte_config *config, latte_sdk **out);
 
 /*
  * latte_activate — validate a license key and activate this machine.

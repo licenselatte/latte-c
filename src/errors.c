@@ -22,6 +22,7 @@ const char *latte_strerror(latte_status s)
     case LATTE_ERR_SEAT_LIMIT:              return "licenselatte: activation seat limit reached";
     case LATTE_ERR_LICENSE_NOT_FOUND:       return "licenselatte: license not found";
     case LATTE_ERR_INVALID_PROJECT_KEY:     return "licenselatte: invalid project key";
+    case LATTE_ERR_INVALID_CONFIG:          return "licenselatte: invalid config (app_id required)";
     case LATTE_ERR_INVALID_APPID:           return "licenselatte: invalid AppID";
     case LATTE_ERR_UNKNOWN_ENVIRONMENT:     return "licenselatte: unknown environment";
     case LATTE_ERR_INVALID_APPID_KEY_SEGMENT: return "licenselatte: invalid app id key segment";

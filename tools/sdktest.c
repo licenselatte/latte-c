@@ -3,7 +3,11 @@
  * Manual integration test: activate → check → poll.
  *
  * Usage:
- *   ./sdktest [app_id [license_key]]
+ *   ./sdktest [app_id [license_key [--multi-instance]]]
+ *
+ * With --multi-instance, the SDK stores its token under ./.licenselatte/
+ * instead of the shared OS-wide store, so each working directory can hold
+ * its own license.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,9 +52,11 @@ int main(int argc, char **argv)
 {
     const char *app_id      = argc > 1 ? argv[1] : DEFAULT_APP_ID;
     const char *license_key = argc > 2 ? argv[2] : DEFAULT_LICENSE_KEY;
+    int multi_instance = argc > 3 && strcmp(argv[3], "--multi-instance") == 0;
 
     latte_sdk *sdk = NULL;
-    latte_status st = latte_new(app_id, &sdk);
+    latte_config cfg = { .app_id = app_id, .multi_instance = multi_instance };
+    latte_status st = latte_new(&cfg, &sdk);
     if (st != LATTE_OK) {
         fprintf(stderr, "Failed to init SDK: %s\n", latte_strerror(st));
         return 1;

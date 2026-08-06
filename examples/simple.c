@@ -15,7 +15,8 @@
 int main(void)
 {
     latte_sdk *sdk = NULL;
-    latte_status st = latte_new(SDK_TEST_APP_KEY, &sdk);
+    latte_config cfg = { .app_id = SDK_TEST_APP_KEY };
+    latte_status st = latte_new(&cfg, &sdk);
     if (st != LATTE_OK) {
         fprintf(stderr, "Failed to init SDK: %s\n", latte_strerror(st));
         return 1;

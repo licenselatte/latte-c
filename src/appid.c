@@ -107,3 +107,15 @@ int ll_resolve_storage_path(const char *app_key, char *path_out, size_t path_siz
 #endif
     return 0;
 }
+
+int ll_resolve_storage_path_local(const char *app_key, char *path_out, size_t path_size)
+{
+    if (mkdir_p(".licenselatte") < 0) return -1;
+
+#if defined(_WIN32)
+    snprintf(path_out, path_size, ".licenselatte\\%s.latte", app_key);
+#else
+    snprintf(path_out, path_size, ".licenselatte/%s.latte", app_key);
+#endif
+    return 0;
+}
