@@ -2,6 +2,8 @@
 
 C library SDK for [LicenseLatte](https://licenselatte.com) — a port of the official [`latte-go`](https://github.com/licenselatte/latte-go) SDK with exact behavioral parity.
 
+Full docs: [licenselatte.com/docs/sdks/c](https://licenselatte.com/docs/sdks/c) (C) · [licenselatte.com/docs/sdks/cpp](https://licenselatte.com/docs/sdks/cpp) (C++) · [licenselatte.com/docs/sdks/d](https://licenselatte.com/docs/sdks/d) (D)
+
 Embed license enforcement directly into your C application in a few lines of code. The library handles activation, offline grace periods, background token renewal, and local token caching transparently.
 
 > [!NOTE]
