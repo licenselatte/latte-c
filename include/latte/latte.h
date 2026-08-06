@@ -8,7 +8,7 @@ extern "C" {
 #include <stddef.h>
 #include <stdint.h>
 
-/* Opaque SDK handle — create with latte_new, destroy with latte_free. */
+/* Opaque SDK handle: create with latte_new, destroy with latte_free. */
 typedef struct latte_sdk latte_sdk;
 
 typedef enum {
@@ -50,7 +50,7 @@ typedef struct {
  * issued_at / expires_at are Unix seconds (UTC).
  * grace_period_seconds is the offline tolerance window measured from issued_at.
  * in_grace_period is 1 when the device has been offline > 60 min but the grace
- *   window has not yet elapsed — surface a "please reconnect" warning.
+ *   window has not yet elapsed: surface a "please reconnect" warning.
  */
 typedef struct {
   char *key;
@@ -66,35 +66,53 @@ typedef struct {
 } latte_license;
 
 /*
- * Configuration for latte_new().
- *
- * app_id:         project key from the LicenseLatte dashboard, format
- *                 pk_{env}_{32}. Required.
- *
- * multi_instance: normally one machine has a single cached token per app_id
- *                 (stored in the OS config directory), so only one license
- *                 can be active for that app at a time on the machine. Set
- *                 this to 1 to let several independently-licensed instances
- *                 of the *same* app_id run side by side (e.g. several
- *                 portable installs of the same app, each in its own
- *                 directory, each activated with a different license). The
- *                 working directory itself is the instance boundary: the
- *                 token is stored at `.licenselatte/{app_key}.latte`
- *                 relative to the CWD instead of the shared OS config
- *                 directory, which is never read or written in this mode.
+ * Configuration for latte_new(), built with latte_config_new() and the
+ * latte_config_set_* setters below. Opaque so new options can be added
+ * without breaking existing callers or the SDK's binary interface.
  */
-typedef struct {
-  const char *app_id;
-  int         multi_instance;
-} latte_config;
+typedef struct latte_config latte_config;
 
 /*
- * latte_new — create one SDK instance per application process.
+ * latte_config_new: start building a config.
  *
- * config: see latte_config. Not retained; may be stack-allocated.
+ * app_id: project key from the LicenseLatte dashboard, format
+ *         pk_{env}_{32}. Required; copied internally.
+ *
+ * Returns NULL on allocation failure or if app_id is NULL. Free with
+ * latte_config_free() when done - see latte_new().
+ */
+latte_config *latte_config_new(const char *app_id);
+
+/*
+ * latte_config_set_multi_instance - opt into per-directory token storage.
+ *
+ * Normally one machine has a single cached token per app_id (stored in the
+ * OS config directory), so only one license can be active for that app at
+ * a time on the machine. Set multi_instance to 1 to let several
+ * independently-licensed instances of the *same* app_id run side by side
+ * (e.g. several portable installs of the same app, each in its own
+ * directory, each activated with a different license). The working
+ * directory itself is the instance boundary: the token is stored at
+ * `.licenselatte/{app_id}.latte` relative to the CWD instead of the
+ * shared OS config directory, which is never read or written in this mode.
+ *
+ * Returns cfg, for chaining. No-op if cfg is NULL.
+ */
+latte_config *latte_config_set_multi_instance(latte_config *cfg, int multi_instance);
+
+/* Release a config built with latte_config_new(). */
+void latte_config_free(latte_config *cfg);
+
+/*
+ * latte_new - create one SDK instance per application process.
+ *
+ * config: built with latte_config_new(). latte_new() reads cfg but does
+ *         not take ownership of it. Call latte_config_free() when you're
+ *         done with cfg, regardless of whether latte_new() succeeded or
+ *         failed.
  * out:    receives the new SDK handle on LATTE_OK.
  *
- * Returns LATTE_ERR_INVALID_CONFIG if config or config->app_id is NULL,
+ * Returns LATTE_ERR_INVALID_CONFIG if config or its app_id is NULL,
  *         LATTE_ERR_INVALID_APPID / _CHECKSUM if app_id is malformed,
  *         LATTE_ERR_STORAGE_INIT_FAILED if the token directory cannot be
  * created, LATTE_ERR_MACHINE_ID_FAILED if the machine fingerprint cannot be
@@ -103,7 +121,7 @@ typedef struct {
 latte_status latte_new(const latte_config *config, latte_sdk **out);
 
 /*
- * latte_activate — validate a license key and activate this machine.
+ * latte_activate: validate a license key and activate this machine.
  *
  * Fast path: if a valid cached token exists, returns immediately (no network).
  *   A background thread silently renews the token to keep it fresh.
@@ -119,7 +137,7 @@ latte_status latte_activate(latte_sdk *sdk, const char *key,
                             latte_license **out);
 
 /*
- * latte_check — validate the locally-stored token without a network call.
+ * latte_check: validate the locally-stored token without a network call.
  *
  * Returns LATTE_ERR_NOT_ACTIVATED if Activate has never been called.
  * Returns LATTE_ERR_LICENSE_EXPIRED if the grace period has elapsed.

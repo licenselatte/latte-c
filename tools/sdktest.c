@@ -1,5 +1,5 @@
 /*
- * sdktest — port of cmd/sdktest/main.go.
+ * sdktest: port of cmd/sdktest/main.go.
  * Manual integration test: activate → check → poll.
  *
  * Usage:
@@ -55,8 +55,10 @@ int main(int argc, char **argv)
     int multi_instance = argc > 3 && strcmp(argv[3], "--multi-instance") == 0;
 
     latte_sdk *sdk = NULL;
-    latte_config cfg = { .app_id = app_id, .multi_instance = multi_instance };
-    latte_status st = latte_new(&cfg, &sdk);
+    latte_config *cfg = latte_config_set_multi_instance(
+        latte_config_new(app_id), multi_instance);
+    latte_status st = latte_new(cfg, &sdk);
+    latte_config_free(cfg);
     if (st != LATTE_OK) {
         fprintf(stderr, "Failed to init SDK: %s\n", latte_strerror(st));
         return 1;

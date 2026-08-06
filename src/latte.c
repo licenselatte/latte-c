@@ -214,6 +214,38 @@ static void maybe_start_renew(latte_sdk *sdk, const ll_license *lic)
 }
 
 /* -------------------------------------------------------------------------
+ * Config builder
+ * ------------------------------------------------------------------------- */
+
+struct latte_config {
+    char *app_id;
+    int   multi_instance;
+};
+
+latte_config *latte_config_new(const char *app_id)
+{
+    if (!app_id) return NULL;
+    latte_config *cfg = (latte_config *)calloc(1, sizeof(latte_config));
+    if (!cfg) return NULL;
+    cfg->app_id = strdup_safe(app_id);
+    if (!cfg->app_id) { free(cfg); return NULL; }
+    return cfg;
+}
+
+latte_config *latte_config_set_multi_instance(latte_config *cfg, int multi_instance)
+{
+    if (cfg) cfg->multi_instance = multi_instance;
+    return cfg;
+}
+
+void latte_config_free(latte_config *cfg)
+{
+    if (!cfg) return;
+    free(cfg->app_id);
+    free(cfg);
+}
+
+/* -------------------------------------------------------------------------
  * Public API
  * ------------------------------------------------------------------------- */
 
