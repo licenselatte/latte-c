@@ -1,7 +1,7 @@
 #ifndef LATTE_CONSTANTS_H
 #define LATTE_CONSTANTS_H
 
-/* Master Ed25519 public key (hex) — hardcoded, never changes. */
+/* Master Ed25519 public key (hex): hardcoded, never changes. */
 #define LATTE_MASTER_PUBKEY_HEX \
     "6773cdfdfb7fc44f13f097449b715e7147a2d73f525d9f09a8d25229e458a2fb"
 

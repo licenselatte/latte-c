@@ -111,7 +111,7 @@ static int get_raw_machine_id(char *out, size_t out_size) {
 }
 
 #else
-#error "Unsupported platform — add a get_raw_machine_id() implementation"
+#error "Unsupported platform: add a get_raw_machine_id() implementation"
 #endif
 
 /* --- HMAC-SHA256 protect ------------------------------------------------- */

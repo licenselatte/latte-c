@@ -34,21 +34,21 @@ int main(void)
 
     const char *mid = "test-machine-001";
 
-    /* Happy path — perpetual, issued now, expires in 30 days, 7-day grace */
+    /* Happy path: perpetual, issued now, expires in 30 days, 7-day grace */
     {
         ll_license l = make_lic(LATTE_TYPE_PERPETUAL, 0,
                                  30*24*3600, 7*24*3600);
         CHECK(ll_validate(&l, mid) == LL_PORT_OK, "happy path: perpetual");
     }
 
-    /* perpetual_fixed — only checks hard expiry, no grc */
+    /* perpetual_fixed: only checks hard expiry, no grc */
     {
         ll_license l = make_lic(LATTE_TYPE_PERPETUAL_FIXED, -100,
                                  365*24*3600, 1 /* irrelevant, but must be > 0 */);
         CHECK(ll_validate(&l, mid) == LL_PORT_OK, "perpetual_fixed: future exp");
     }
 
-    /* perpetual_fixed — past expiry → expired */
+    /* perpetual_fixed: past expiry → expired */
     {
         ll_license l = make_lic(LATTE_TYPE_PERPETUAL_FIXED, -200,
                                  -100, 1);

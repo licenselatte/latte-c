@@ -11,7 +11,7 @@
  *   Ed25519 public key (32 bytes raw).
  *
  *   Checks: signature valid, header alg == "EdDSA", payload iss == "licenselatte".
- *   Does NOT enforce exp (matches Go SDK behaviour — grace logic is applied separately).
+ *   Does NOT enforce exp (matches Go SDK behaviour, grace logic is applied separately).
  *
  *   On success, returns 0 and sets *claims_out to a cJSON object that the
  *   caller must free with cJSON_Delete().

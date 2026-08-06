@@ -16,7 +16,7 @@ typedef enum {
     LL_PORT_ERR_INVALID_PROJECT_KEY,
     LL_PORT_ERR_GRACE_PERIOD_EXPIRED,
     LL_PORT_ERR_LICENSE_TOO_OLD,
-    LL_PORT_ERR_INVALID_LICENSE,  /* generic invalid — wipe stored token */
+    LL_PORT_ERR_INVALID_LICENSE,  /* generic invalid: wipe stored token */
 } ll_port_error;
 
 latte_status map_network_error(ll_port_error e);

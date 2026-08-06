@@ -1,5 +1,5 @@
 /*
- * machineid_test — calls ll_machine_id_protected with a fixed app ID.
+ * machineid_test: calls ll_machine_id_protected with a fixed app ID.
  *
  * Usage:
  *   ./machineid_test

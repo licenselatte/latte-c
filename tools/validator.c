@@ -1,5 +1,5 @@
 /*
- * validator — port of cmd/validator/main.go.
+ * validator: port of cmd/validator/main.go.
  * Low-level debug tool: activate, print raw JWT claims, renew.
  *
  * Usage:

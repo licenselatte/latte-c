@@ -16,7 +16,7 @@ typedef struct {
  * All string fields heap-allocated; free with ll_license_free().
  */
 typedef struct {
-    char    *key;            /* sub claim — license key, no hyphens */
+    char    *key;            /* sub claim: license key, no hyphens */
     char    *activation_id;  /* aid */
     char    *project_id;     /* pid */
     char    *machine_id_hash;/* mid */
