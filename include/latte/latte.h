@@ -127,8 +127,13 @@ latte_status latte_new(const latte_config *config, latte_sdk **out);
  *   A background thread silently renews the token to keep it fresh.
  * Slow path: calls POST /v1/activate and stores the token.
  *
- * The key is normalised automatically (uppercase, strip hyphens/spaces,
- * O→0, I→1, L→1).
+ * The key is normalised automatically (uppercase, strip hyphens/spaces) and
+ * given a minimal sanity check (non-empty, not implausibly long) before
+ * ever reaching the network -- a license key may be native or a
+ * legacy-system alias (see the legacy-key-migration feature in
+ * license-latte-api, internal/usecase/api/activate_license.go), and only
+ * the server knows which, so anything beyond that minimal check is
+ * deferred to it.
  *
  * out receives a heap-allocated latte_license on LATTE_OK; free with
  * latte_license_free().

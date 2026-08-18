@@ -310,14 +310,22 @@ latte_status latte_activate(latte_sdk *sdk, const char *key, latte_license **out
     if (!sdk || !key || !out) return LATTE_ERR_INTERNAL;
     *out = NULL;
 
-    /* Sanitise the key */
+    /* Sanitised (native-alphabet fold) is only used to match a cached
+     * license's `key` (sub claim), which is always the canonical native
+     * form. Normalized (uppercase + strip separators, no fold) is what's
+     * actually sent over the wire and matched against a cached license's
+     * `alias` claim -- a license key may be native or a legacy-system
+     * alias, and only the server knows which, so anything beyond a
+     * minimal sanity check below is deferred to it. */
     char sanitized[64];
+    char normalized[64];
     ll_sanitize_key(key, sanitized, sizeof(sanitized));
+    ll_normalize_key(key, normalized, sizeof(normalized));
 
-    /* Validate format: length 30, first 6 chars match app_key[:6], 2-char checksum */
-    if (strlen(sanitized) != 30) return LATTE_ERR_INVALID_KEY;
-    if (strncmp(sanitized, sdk->app_key, 6) != 0) return LATTE_ERR_INVALID_KEY;
-    if (!ll_validate_key(sanitized + 6, 2)) return LATTE_ERR_INVALID_KEY;
+    /* Minimal local sanity check: reject obviously-not-a-key input
+     * (empty, or implausibly long) without a network round trip. */
+    size_t normalized_len = strlen(normalized);
+    if (normalized_len == 0 || normalized_len > 256) return LATTE_ERR_INVALID_KEY;
 
     /* Fast path: try the cached token */
     char *raw_token = NULL;
@@ -328,7 +336,10 @@ latte_status latte_activate(latte_sdk *sdk, const char *key, latte_license **out
         if (ll_verify_activation(sdk->master_pub, raw_token, chain, &lic, &ve) == 0) {
             if (ll_validate(lic, sdk->machine_id) == LL_PORT_OK) {
                 maybe_start_renew(sdk, lic);
-                if (lic->key && strcmp(lic->key, sanitized) == 0 && ll_license_is_valid(lic)) {
+                int key_matches = lic->key && strcmp(lic->key, sanitized) == 0;
+                int alias_matches = lic->alias && lic->alias[0] != '\0' &&
+                                     strcmp(lic->alias, normalized) == 0;
+                if ((key_matches || alias_matches) && ll_license_is_valid(lic)) {
                     latte_license *pub = domain_to_public(lic);
                     ll_license_free(lic);
                     free(raw_token); ll_cert_chain_free(chain);
@@ -344,7 +355,7 @@ latte_status latte_activate(latte_sdk *sdk, const char *key, latte_license **out
     }
 
     /* Slow path: activate via API */
-    ll_port_error pe = ll_http_activate(sdk->http, sanitized, sdk->machine_id,
+    ll_port_error pe = ll_http_activate(sdk->http, normalized, sdk->machine_id,
                                         &raw_token, &chain);
     if (pe != LL_PORT_OK) return map_network_error(pe);
 

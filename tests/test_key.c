@@ -31,6 +31,16 @@ int main(void)
     ll_sanitize_key("G98S8-BWAR6-Y0Z7F-JT10A-7EWD9-33265", out, sizeof(out));
     CHECK(strcmp(out, "G98S8BWAR6Y0Z7FJT10A7EWD933265") == 0, "real key normalise");
 
+    /* --- normalize_key: no O/I/L fold, unlike sanitize_key --- */
+    ll_normalize_key("ABCD-EF-GH", out, sizeof(out));
+    CHECK(strcmp(out, "ABCDEFGH") == 0, "normalize: strip hyphens");
+
+    ll_normalize_key("ab cd", out, sizeof(out));
+    CHECK(strcmp(out, "ABCD") == 0, "normalize: uppercase + strip spaces");
+
+    ll_normalize_key("OIL0", out, sizeof(out));
+    CHECK(strcmp(out, "OIL0") == 0, "normalize: does not fold O/I/L");
+
     /* --- validate_key: AppID segment (4-char checksum) ---
      * AppID: pk_live_G98S8BKDDMZW32RMQM8NZT33E5CTFEDC
      * The 32-char segment is: G98S8BKDDMZW32RMQM8NZT33E5CTFEDC

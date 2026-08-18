@@ -85,6 +85,7 @@ int ll_verify_activation(const unsigned char *master_pub,
     if (!lic) goto fail;
 
     lic->key            = strdup_safe(ll_jwt_string_claim(act_claims, "sub"));
+    lic->alias          = strdup_safe(ll_jwt_string_claim(act_claims, "alias"));
     lic->activation_id  = strdup_safe(ll_jwt_string_claim(act_claims, "aid"));
     lic->project_id     = strdup_safe(ll_jwt_string_claim(act_claims, "pid"));
     lic->machine_id_hash= strdup_safe(ll_jwt_string_claim(act_claims, "mid"));

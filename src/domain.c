@@ -5,6 +5,7 @@ void ll_license_free(ll_license *l)
 {
     if (!l) return;
     free(l->key);
+    free(l->alias);
     free(l->activation_id);
     free(l->project_id);
     free(l->machine_id_hash);

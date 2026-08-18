@@ -17,6 +17,15 @@ typedef struct {
  */
 typedef struct {
     char    *key;            /* sub claim: license key, no hyphens */
+    /*
+     * alias claim: the legacy-system key string this license was resolved
+     * from, when it was minted via a legacy-key migration alias rather than
+     * activated by its own native key. NULL (or "") for a natively-keyed
+     * license. Internal only -- used to recognize a cached token on a later
+     * latte_activate() call passing the same legacy key, since `key` above
+     * will be the newly minted native key instead.
+     */
+    char    *alias;
     char    *activation_id;  /* aid */
     char    *project_id;     /* pid */
     char    *machine_id_hash;/* mid */

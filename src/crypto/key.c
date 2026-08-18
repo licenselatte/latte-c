@@ -61,3 +61,14 @@ void ll_sanitize_key(const char *src, char *dst, size_t dst_size)
     }
     dst[j] = '\0';
 }
+
+void ll_normalize_key(const char *src, char *dst, size_t dst_size)
+{
+    size_t j = 0;
+    for (size_t i = 0; src[i] && j + 1 < dst_size; i++) {
+        char c = (char)toupper((unsigned char)src[i]);
+        if (c == '-' || c == ' ') continue;
+        dst[j++] = c;
+    }
+    dst[j] = '\0';
+}
