@@ -90,8 +90,24 @@ static latte_license *domain_to_public(const ll_license *d)
             pub->metadata_count = d->metadata_count;
         }
     }
+
+    /* has_entitlements is copied unconditionally: an empty ent claim still
+     * sets it, and that is the whole distinction it carries. */
+    pub->has_entitlements = d->has_entitlements ? 1u : 0u;
+    if (d->entitlement_count > 0) {
+        pub->entitlements =
+            (latte_entitlement *)calloc(d->entitlement_count, sizeof(latte_entitlement));
+        if (pub->entitlements) {
+            for (size_t i = 0; i < d->entitlement_count; i++) {
+                pub->entitlements[i]      = d->entitlements[i];
+                pub->entitlements[i].key  = strdup_safe(d->entitlements[i].key);
+            }
+            pub->entitlement_count = (uint32_t)d->entitlement_count;
+        }
+    }
     return pub;
 }
+
 
 static int should_try_renew(latte_sdk *sdk, const ll_license *lic)
 {
@@ -432,6 +448,10 @@ void latte_license_free(latte_license *lic)
         free(lic->metadata[i].value);
     }
     free(lic->metadata);
+    for (uint32_t i = 0; i < lic->entitlement_count; i++) {
+        free(lic->entitlements[i].key);
+    }
+    free(lic->entitlements);
     free(lic);
 }
 

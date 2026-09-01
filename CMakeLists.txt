@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(latte-c VERSION 1.2.1 LANGUAGES C CXX)
+project(latte-c VERSION 1.3.0 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -39,6 +39,7 @@ target_compile_options(cjson PRIVATE -w)   # suppress cJSON warnings
 # ---------------------------------------------------------------------------
 set(LATTE_SOURCES
     src/domain.c
+    src/entitlements.c
     src/errors.c
     src/appid.c
     src/machineid.c
@@ -113,7 +114,7 @@ target_include_directories(validator PRIVATE include src)
 target_link_libraries(validator PRIVATE latte_static ${LIBSODIUM_LIBRARIES})
 
 add_executable(machineid_test tools/machineid_test.c)
-target_include_directories(machineid_test PRIVATE src)
+target_include_directories(machineid_test PRIVATE include src)
 target_link_libraries(machineid_test PRIVATE latte_static)
 
 # ---------------------------------------------------------------------------
@@ -123,7 +124,7 @@ enable_testing()
 
 # test_key
 add_executable(test_key tests/test_key.c src/crypto/key.c)
-target_include_directories(test_key PRIVATE src)
+target_include_directories(test_key PRIVATE include src)
 add_test(NAME key COMMAND test_key)
 
 # test_storage
@@ -132,7 +133,7 @@ add_executable(test_storage
     src/domain.c
     src/storage/file.c
 )
-target_include_directories(test_storage PRIVATE src)
+target_include_directories(test_storage PRIVATE include src)
 target_link_libraries(test_storage PRIVATE cjson)
 add_test(NAME storage COMMAND test_storage)
 
@@ -142,8 +143,17 @@ add_executable(test_validate
     src/validate.c
     src/domain.c
 )
-target_include_directories(test_validate PRIVATE src)
+target_include_directories(test_validate PRIVATE include src)
 add_test(NAME validate COMMAND test_validate)
+
+# test_entitlements
+add_executable(test_entitlements
+    tests/test_entitlements.c
+    src/entitlements.c
+)
+target_include_directories(test_entitlements PRIVATE include src vendor/cjson)
+target_link_libraries(test_entitlements PRIVATE cjson)
+add_test(NAME entitlements COMMAND test_entitlements)
 
 # test_jwt
 add_executable(test_jwt
@@ -151,7 +161,7 @@ add_executable(test_jwt
     src/crypto/base64url.c
     src/crypto/jwt.c
 )
-target_include_directories(test_jwt PRIVATE src ${LIBSODIUM_INCLUDE_DIRS})
+target_include_directories(test_jwt PRIVATE include src ${LIBSODIUM_INCLUDE_DIRS})
 target_link_libraries(test_jwt PRIVATE cjson ${LIBSODIUM_LIBRARIES})
 add_test(NAME jwt COMMAND test_jwt)
 

@@ -2,6 +2,7 @@
 #include "constants.h"
 #include "crypto/cert.h"
 #include "crypto/jwt.h"
+#include "entitlements.h"
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -116,6 +117,11 @@ int ll_verify_activation(const unsigned char *master_pub,
             }
         }
     }
+
+    /* Extract ent entitlements. See src/entitlements.h for the rules. */
+    lic->has_entitlements = ll_decode_entitlements(
+        cJSON_GetObjectItemCaseSensitive(act_claims, "ent"),
+        &lic->entitlements, &lic->entitlement_count);
 
     cJSON_Delete(sub_claims);
     cJSON_Delete(proj_claims);

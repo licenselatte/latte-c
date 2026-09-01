@@ -20,6 +20,7 @@
 #include "latte/latte.h"
 
 #include <map>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -74,6 +75,31 @@ public:
     std::map<std::string, std::string> out;
     for (uint32_t i = 0; i < lic_->metadata_count; ++i)
       out.emplace(str(lic_->metadata[i].key), str(lic_->metadata[i].value));
+    return out;
+  }
+
+  /*
+   * Typed entitlements. See the latte_entitlement comment in latte.h for
+   * the contract; the short version is that absence denies, there is no
+   * coercion across kinds, and has_entitlements() is the probe you branch
+   * on while your installed base renews.
+   */
+  bool can(const std::string &key) const { return latte_can(lic_, key.c_str()) != 0; }
+
+  std::optional<int64_t> limit(const std::string &key) const {
+    int64_t out = 0;
+    if (latte_limit(lic_, key.c_str(), &out) == 0)
+      return std::nullopt;
+    return out;
+  }
+
+  bool has_entitlements() const noexcept { return latte_has_entitlements(lic_) != 0; }
+
+  /* The whole map, for enumerating what was granted. Prefer can()/limit(). */
+  std::map<std::string, latte_entitlement> entitlements() const {
+    std::map<std::string, latte_entitlement> out;
+    for (uint32_t i = 0; i < lic_->entitlement_count; ++i)
+      out.emplace(str(lic_->entitlements[i].key), lic_->entitlements[i]);
     return out;
   }
 

@@ -16,6 +16,10 @@ void ll_license_free(ll_license *l)
     }
     free(l->metadata_keys);
     free(l->metadata_values);
+    for (size_t i = 0; i < l->entitlement_count; i++) {
+        free(l->entitlements[i].key);
+    }
+    free(l->entitlements);
     free(l);
 }
 

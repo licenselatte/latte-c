@@ -24,6 +24,7 @@ Embed license enforcement directly into your C application in a few lines of cod
     - [latte_new](#latte_new)
     - [latte_activate](#latte_activate)
     - [latte_check](#latte_check)
+    - [latte_can / latte_limit / latte_has_entitlements](#latte_can--latte_limit--latte_has_entitlements)
     - [latte_license_free / latte_free](#latte_license_free--latte_free)
     - [latte_strerror](#latte_strerror)
 - [The latte_license struct](#the-latte_license-struct)
@@ -34,6 +35,7 @@ Embed license enforcement directly into your C application in a few lines of cod
 - [Token storage](#token-storage)
 - [Background renewal](#background-renewal)
 - [Custom metadata](#custom-metadata)
+- [Entitlements](#entitlements)
 - [Environments](#environments)
 - [Cross-SDK compatibility](#cross-sdk-compatibility)
 - [Architecture](#architecture)
@@ -341,6 +343,22 @@ Returns `LATTE_ERR_LICENSE_EXPIRED` if the token's grace period has elapsed.
 
 A background renewal thread is triggered automatically when the token is old enough (≥ 60 min since issuance).
 
+### latte_can / latte_limit / latte_has_entitlements
+
+```c
+int latte_can(const latte_license *lic, const char *key);
+int latte_limit(const latte_license *lic, const char *key, int64_t *out);
+int latte_has_entitlements(const latte_license *lic);
+
+#define LATTE_UNLIMITED ((int64_t)-1)
+```
+
+Read the typed entitlements signed into the licence. `latte_can` returns 1 or
+0; `latte_limit` returns 1 and writes through `out` when the key is present
+and integer-kinded, 0 otherwise (`out` may be `NULL` to test presence alone).
+All three tolerate a `NULL` licence or key and answer "no". See the
+[Entitlements](#entitlements) section for the semantics.
+
 ### latte_license_free / latte_free
 
 ```c
@@ -376,8 +394,19 @@ typedef struct {
     int      in_grace_period;      /* 1 → offline > 60 min; show "please reconnect" */
     size_t   metadata_count;       /* number of custom metadata key-value pairs */
     latte_kv *metadata;            /* array of {char *key, char *value} */
+
+    /* Entitlements — appended at the end; see the Entitlements section. */
+    uint32_t has_entitlements;     /* 1 → the token carried an `ent` claim at all */
+    uint32_t entitlement_count;    /* number of decoded entitlements */
+    latte_entitlement *entitlements;
 } latte_license;
 ```
+
+New fields are **appended** to this struct, never inserted, so an already
+compiled caller keeps working across a minor release: you never allocate or
+`sizeof` a `latte_license` — you receive one from `latte_activate` /
+`latte_check` and hand it back to `latte_license_free`, so the library owns
+the layout.
 
 `in_grace_period` is `1` once the device has been offline longer than 60 minutes but the full grace window has not elapsed yet. Surface this to the user as a "please reconnect soon" warning.
 
@@ -596,6 +625,94 @@ for (size_t i = 0; i < lic->metadata_count; i++) {
 ```
 
 Metadata values are always strings. They are signed by the server and cannot be tampered with by the client.
+
+---
+
+## Entitlements
+
+Entitlements are the typed answers a seller signed into a licence about what
+their customer bought. Two questions, and only two: *may this customer do X*
+(a boolean) and *how many Y do they get* (an integer).
+
+```c
+latte_license *lic = NULL;
+latte_activate(sdk, key, &lic);
+
+if (latte_can(lic, "export_pdf"))
+    enable_pdf_export();
+
+int64_t max_projects;
+if (latte_limit(lic, "max_projects", &max_projects) &&
+    max_projects != LATTE_UNLIMITED && used >= max_projects) {
+    return E_PROJECT_LIMIT;
+}
+```
+
+You set the values on a policy and override them per licence in the
+dashboard; the server resolves the two and signs the result into the
+activation token, so `latte_can` and `latte_limit` answer offline with no
+network call.
+
+`LATTE_UNLIMITED` is `-1`. `latte_limit` writes it out as-is — compare
+against the macro rather than testing for a negative number.
+
+### The rules
+
+| | |
+|---|---|
+| **Absence denies.** | An unset key is `latte_can() == 0`, `latte_limit() == 0`. |
+| **No coercion.** | `latte_can` on an integer is 0 even when it is non-zero. `latte_limit` on a boolean returns 0 rather than writing a 1 or a 0. |
+| **Keys are byte-exact.** | `strcmp`, no case folding and no trimming. |
+| **A bad value is dropped, never fatal.** | If a value reaches the token that is neither a boolean nor a whole number, that one entry vanishes and the licence stays valid. |
+
+### Rolling this out without switching your own features off
+
+Absence denies, and that has a consequence worth reading twice: **a token
+issued before you set any entitlements answers 0 to everything.** Ship
+`if (!latte_can(lic, "export_pdf")) hide();` and every customer still holding
+a cached token from before the change loses PDF export until they renew.
+
+`latte_has_entitlements` exists for exactly this, and it is not a convenience
+accessor:
+
+```c
+int enabled = latte_has_entitlements(lic)
+    ? latte_can(lic, "export_pdf")
+    : legacy_behaviour();   /* this token predates entitlements */
+```
+
+The published order is: set the values in the dashboard first, wait one grace
+window for the installed base to renew, then ship the release that reads them
+behind `latte_has_entitlements`, and drop the fallback once the base has
+turned over.
+
+`latte_has_entitlements` reports whether the claim was **present**, including
+when it is empty — which is why it is not an `entitlement_count > 0` check.
+
+### Entitlements are not metadata
+
+Entitlements and `metadata` are separate namespaces and never merge. Metadata
+is arbitrary display data, filtered per field in the dashboard, and stringly
+typed; entitlements are booleans and integers, unfiltered, and exist
+precisely to be read on the customer's machine. The same key may appear in
+both meaning different things.
+
+Entitlements are a distribution mechanism for a signed answer, not a
+tamper-proofing one. If real revenue depends on a feature, re-validate it
+server-side.
+
+### From C++
+
+```cpp
+latte::License lic = sdk.activate(key);
+
+if (lic.can("export_pdf")) enable_pdf_export();
+
+if (auto max = lic.limit("max_projects"); max && *max != LATTE_UNLIMITED && used >= *max)
+    throw ProjectLimitReached{};
+
+if (!lic.has_entitlements()) { /* token predates entitlements */ }
+```
 
 ---
 

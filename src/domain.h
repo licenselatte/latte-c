@@ -1,6 +1,8 @@
 #ifndef LATTE_DOMAIN_H
 #define LATTE_DOMAIN_H
 
+#include "latte/latte.h"
+
 #include <stdint.h>
 #include <time.h>
 
@@ -38,6 +40,15 @@ typedef struct {
     size_t   metadata_count;
     char   **metadata_keys;
     char   **metadata_values;
+
+    /*
+     * ent sub-object: the typed entitlements map. has_entitlements records
+     * whether the claim was present at all -- an empty claim is not the
+     * same as an absent one, and only that flag can tell them apart.
+     */
+    int                has_entitlements;
+    size_t             entitlement_count;
+    latte_entitlement *entitlements;
 } ll_license;
 
 void ll_license_free(ll_license *l);
