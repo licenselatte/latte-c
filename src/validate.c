@@ -11,7 +11,19 @@ int ll_license_is_valid(const ll_license *lic)
     return age <= lic->grace_period;
 }
 
+int ll_in_grace_period_at(const ll_license *lic, int64_t now)
+{
+    int64_t age = now - lic->issued_at;
+    return (age > LATTE_MAX_RENEWAL_SECS && age < lic->grace_period) ? 1 : 0;
+}
+
 ll_port_error ll_validate(const ll_license *lic, const char *machine_id)
+{
+    return ll_validate_at(lic, machine_id, (int64_t)time(NULL));
+}
+
+ll_port_error ll_validate_at(const ll_license *lic, const char *machine_id,
+                             int64_t now)
 {
     if (!lic->issued_at || !lic->expires_at)
         return LL_PORT_ERR_INVALID_LICENSE;
@@ -19,16 +31,17 @@ ll_port_error ll_validate(const ll_license *lic, const char *machine_id)
     if (lic->grace_period <= 0)
         return LL_PORT_ERR_INVALID_LICENSE;
 
-    /* Reject if the token was issued for a different machine. */
+    /* Reject if the token was issued for a different machine. Its own
+     * reason code, not the generic one: latte-testvectors treats
+     * machine_id_mismatch as one of the four validate-stage reasons a port
+     * may not collapse into another. */
     if (!lic->machine_id_hash || !machine_id ||
         strcmp(lic->machine_id_hash, machine_id) != 0)
-        return LL_PORT_ERR_INVALID_LICENSE;
+        return LL_PORT_ERR_MACHINE_ID_MISMATCH;
 
 
     if (lic->expires_at < lic->issued_at)
         return LL_PORT_ERR_INVALID_LICENSE;
-
-    int64_t now = (int64_t)time(NULL);
 
     /* perpetual_fixed: only check hard expiry */
     if (lic->license_type && strcmp(lic->license_type, LATTE_TYPE_PERPETUAL_FIXED) == 0) {

@@ -155,6 +155,23 @@ target_include_directories(test_entitlements PRIVATE include src vendor/cjson)
 target_link_libraries(test_entitlements PRIVATE cjson)
 add_test(NAME entitlements COMMAND test_entitlements)
 
+# test_fixtures — the shared cross-language suite from testdata/ (a
+# submodule of latte-testvectors). Runs from the source dir so the fixture
+# paths resolve without copying them into the build tree.
+add_executable(test_fixtures
+    tests/test_fixtures.c
+    src/verify.c
+    src/validate.c
+    src/domain.c
+    src/entitlements.c
+    src/crypto/base64url.c
+    src/crypto/jwt.c
+    src/crypto/cert.c
+)
+target_include_directories(test_fixtures PRIVATE include src vendor/cjson ${LIBSODIUM_INCLUDE_DIRS})
+target_link_libraries(test_fixtures PRIVATE cjson ${LIBSODIUM_LIBRARIES})
+add_test(NAME fixtures COMMAND test_fixtures WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 # test_jwt
 add_executable(test_jwt
     tests/test_jwt.c

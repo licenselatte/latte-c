@@ -14,9 +14,42 @@ static int hex_val(char c)
 
 int ll_verify_cert(const unsigned char *parent_pub,
                    const char *cert_jwt,
+                   int64_t now,
                    cJSON **claims_out)
 {
-    return ll_jwt_verify_ed25519(cert_jwt, parent_pub, 32, claims_out);
+    cJSON *claims = NULL;
+    if (ll_jwt_verify_ed25519(cert_jwt, parent_pub, 32, &claims) < 0)
+        return -1;
+
+    /*
+     * Zero leeway, and each claim enforced only if present -- the same
+     * contract golang-jwt/v5 applies in latte-go's crypto.VerifyCert, which
+     * passes WithIssuedAt() and a time func but no WithLeeway.
+     *
+     *   exp: expired when now > exp   (strictly after, not at)
+     *   nbf: not yet valid when now < nbf
+     *   iat: not yet valid when now < iat -- a cert cannot have been issued
+     *        in the future, which is the check WithIssuedAt() turns on.
+     */
+    int ok = 0;
+    int64_t exp = ll_jwt_int64_claim(claims, "exp", &ok);
+    if (ok && now > exp) goto reject;
+
+    ok = 0;
+    int64_t nbf = ll_jwt_int64_claim(claims, "nbf", &ok);
+    if (ok && now < nbf) goto reject;
+
+    ok = 0;
+    int64_t iat = ll_jwt_int64_claim(claims, "iat", &ok);
+    if (ok && now < iat) goto reject;
+
+    *claims_out = claims;
+    return 0;
+
+reject:
+    cJSON_Delete(claims);
+    *claims_out = NULL;
+    return -1;
 }
 
 int ll_pubkey_from_cert(const cJSON *claims, const char *field,

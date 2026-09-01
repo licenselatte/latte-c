@@ -67,10 +67,10 @@ static latte_license *domain_to_public(const ll_license *d)
     latte_license *pub = (latte_license *)calloc(1, sizeof(latte_license));
     if (!pub) return NULL;
 
-    time_t now = time(NULL);
-    int64_t age = (int64_t)now - d->issued_at;
-    /* InGracePeriod = age > maxRenewalTime (60 min) && age < grace_period */
-    pub->in_grace_period = (age > LATTE_MAX_RENEWAL_SECS && age < d->grace_period) ? 1 : 0;
+    /* InGracePeriod = age > maxRenewalTime (60 min) && age < grace_period.
+     * Shared with the fixture runner via ll_in_grace_period_at so the two
+     * cannot drift. */
+    pub->in_grace_period = (uint32_t)ll_in_grace_period_at(d, (int64_t)time(NULL));
 
     pub->key             = strdup_safe(d->key);
     pub->activation_id   = strdup_safe(d->activation_id);

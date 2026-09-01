@@ -25,4 +25,23 @@ int ll_verify_activation(const unsigned char *master_pub,
                          ll_license **out,
                          ll_port_error *err_code);
 
+/*
+ * ll_verify_activation_at:
+ *   ll_verify_activation with an injectable clock (`now`, Unix seconds), so
+ *   the shared latte-testvectors fixtures -- each pinned to a fixed instant
+ *   -- can be replayed without depending on the wall clock. Production code
+ *   calls ll_verify_activation; this is the test seam every other SDK
+ *   already has.
+ *
+ *   `now` is used for the three chain certs' validity windows only. The
+ *   activation JWT's own iat/exp are deliberately not authoritative here
+ *   (SPEC.md section 3.3) -- the grace-period math in validate.c is.
+ */
+int ll_verify_activation_at(const unsigned char *master_pub,
+                            const char *token,
+                            const ll_cert_chain *chain,
+                            int64_t now,
+                            ll_license **out,
+                            ll_port_error *err_code);
+
 #endif /* LATTE_VERIFY_H */

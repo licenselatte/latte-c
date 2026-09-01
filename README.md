@@ -129,6 +129,15 @@ target_link_libraries(myapp PRIVATE latte::latte)
 
 ## Running the tests
 
+The shared cross-language fixtures live in `testdata/`, a submodule of
+[latte-testvectors](https://github.com/licenselatte/latte-testvectors). Fetch
+it before the first build, or `test_fixtures` will report an empty vector
+directory:
+
+```sh
+git submodule update --init
+```
+
 ```sh
 ctest --test-dir build --output-on-failure
 ```
@@ -136,19 +145,27 @@ ctest --test-dir build --output-on-failure
 Expected output:
 
 ```
-100% tests passed, 0 tests failed out of 4
+100% tests passed, 0 tests failed out of 6
 
-Total Test time (real) =   0.76 sec
+Total Test time (real) =   0.43 sec
 ```
 
 Individual test binaries can be run directly for verbose output:
 
 ```sh
-./build/test_key       # key checksum and sanitise logic
-./build/test_storage   # JSON record round-trip and legacy format
-./build/test_validate  # grace-period / expiry rules
-./build/test_jwt       # base64url decode and EdDSA JWT verify
+./build/test_key           # key checksum and sanitise logic
+./build/test_storage       # JSON record round-trip and legacy format
+./build/test_validate      # grace-period / expiry rules
+./build/test_jwt           # base64url decode and EdDSA JWT verify
+./build/test_entitlements  # entitlement decoding and the can/limit accessors
+./build/test_fixtures      # the 29 shared latte-testvectors fixtures
 ```
+
+`test_fixtures` is the cross-language parity check: it runs the identical
+JSON vectors that latte-go, latte-rs, latte-py and latte-js run, and must
+agree with them on accept/reject, failure stage, failure reason, grace-period
+flag and entitlements for every one. It runs from the source directory (not
+`build/`) so the fixture paths resolve; `ctest` handles that for you.
 
 ---
 

@@ -82,12 +82,15 @@ int main(void)
               "token too old (> 365 days)");
     }
 
-    /* Machine ID mismatch → invalid */
+    /* Machine ID mismatch → its own reason, not the generic invalid.
+     * latte-testvectors treats machine_id_mismatch as one of the four
+     * validate-stage reasons a port may not collapse into another; both
+     * still map to the same public latte_status. */
     {
         ll_license l = make_lic(LATTE_TYPE_PERPETUAL, 0, 30*24*3600, 7*24*3600);
         l.machine_id_hash = (char *)"different-machine-999";
-        CHECK(ll_validate(&l, mid) == LL_PORT_ERR_INVALID_LICENSE,
-              "machine ID mismatch → invalid");
+        CHECK(ll_validate(&l, mid) == LL_PORT_ERR_MACHINE_ID_MISMATCH,
+              "machine ID mismatch → machine_id_mismatch");
     }
 
     /* Zero grace_period → invalid */

@@ -22,6 +22,17 @@ int ll_verify_activation(const unsigned char *master_pub,
                          ll_license **out,
                          ll_port_error *err_code)
 {
+    return ll_verify_activation_at(master_pub, token, chain,
+                                   (int64_t)time(NULL), out, err_code);
+}
+
+int ll_verify_activation_at(const unsigned char *master_pub,
+                            const char *token,
+                            const ll_cert_chain *chain,
+                            int64_t now,
+                            ll_license **out,
+                            ll_port_error *err_code)
+{
     *out = NULL;
     *err_code = LL_PORT_ERR_INVALID_LICENSE;
 
@@ -30,19 +41,19 @@ int ll_verify_activation(const unsigned char *master_pub,
           *daily_claims = NULL, *act_claims = NULL;
 
     /* Step 1: verify submaster cert (signed by master) → extract spk */
-    if (ll_verify_cert(master_pub, chain->submaster, &sub_claims) < 0)
+    if (ll_verify_cert(master_pub, chain->submaster, now, &sub_claims) < 0)
         goto fail;
     if (ll_pubkey_from_cert(sub_claims, "spk", submaster_pub) < 0)
         goto fail;
 
     /* Step 2: verify project cert (signed by submaster) → extract ppk */
-    if (ll_verify_cert(submaster_pub, chain->project, &proj_claims) < 0)
+    if (ll_verify_cert(submaster_pub, chain->project, now, &proj_claims) < 0)
         goto fail;
     if (ll_pubkey_from_cert(proj_claims, "ppk", project_pub) < 0)
         goto fail;
 
     /* Step 3: verify daily cert (signed by project key) → extract dpk */
-    if (ll_verify_cert(project_pub, chain->daily, &daily_claims) < 0)
+    if (ll_verify_cert(project_pub, chain->daily, now, &daily_claims) < 0)
         goto fail;
     if (ll_pubkey_from_cert(daily_claims, "dpk", daily_pub) < 0)
         goto fail;

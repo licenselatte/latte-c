@@ -16,6 +16,14 @@ typedef enum {
     LL_PORT_ERR_INVALID_PROJECT_KEY,
     LL_PORT_ERR_GRACE_PERIOD_EXPIRED,
     LL_PORT_ERR_LICENSE_TOO_OLD,
+    /*
+     * The token is for a different machine. Distinct from the generic
+     * INVALID_LICENSE because latte-testvectors' taxonomy treats
+     * machine_id_mismatch as one of the four validate-stage reasons a port
+     * may not collapse into another. Both still map to the same public
+     * latte_status, so this changes no observable API behaviour.
+     */
+    LL_PORT_ERR_MACHINE_ID_MISMATCH,
     LL_PORT_ERR_INVALID_LICENSE,  /* generic invalid: wipe stored token */
 } ll_port_error;
 
