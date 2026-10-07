@@ -43,10 +43,13 @@ int main(int argc, char **argv)
     const char *license_key = argc > 2 ? argv[2] : DEFAULT_LICENSE_KEY;
     const char *machine_id  = argc > 3 ? argv[3] : DEFAULT_MACHINE_ID;
 
-    unsigned char master_pub[32];
-    if (hex_decode(LATTE_MASTER_PUBKEY_HEX, master_pub, 32) < 0) {
-        fprintf(stderr, "Bad master public key\n");
-        return 1;
+    static const char *const master_hex[] = LATTE_MASTER_PUBKEYS_HEX;
+    unsigned char master_pubs[LATTE_MASTER_PUBKEY_COUNT * 32];
+    for (size_t i = 0; i < LATTE_MASTER_PUBKEY_COUNT; i++) {
+        if (hex_decode(master_hex[i], master_pubs + 32 * i, 32) < 0) {
+            fprintf(stderr, "Bad master public key\n");
+            return 1;
+        }
     }
 
     /* Use the local API endpoint directly */
@@ -73,7 +76,7 @@ int main(int argc, char **argv)
     printf("→ Validating…\n");
     ll_license *lic = NULL;
     ll_port_error ve = LL_PORT_OK;
-    if (ll_verify_activation(master_pub, token, chain, &lic, &ve) < 0) {
+    if (ll_verify_activation_any(master_pubs, LATTE_MASTER_PUBKEY_COUNT, token, chain, &lic, &ve) < 0) {
         fprintf(stderr, "Verification error: %d\n", ve);
         free(token); ll_cert_chain_free(chain);
         ll_http_client_free(client);
@@ -117,7 +120,7 @@ int main(int argc, char **argv)
 
     ll_license *lic2 = NULL;
     ve = LL_PORT_OK;
-    if (ll_verify_activation(master_pub, renewed_token, renewed_chain, &lic2, &ve) < 0) {
+    if (ll_verify_activation_any(master_pubs, LATTE_MASTER_PUBKEY_COUNT, renewed_token, renewed_chain, &lic2, &ve) < 0) {
         fprintf(stderr, "Renew verification error: %d\n", ve);
         free(renewed_token); ll_cert_chain_free(renewed_chain);
         ll_http_client_free(client);

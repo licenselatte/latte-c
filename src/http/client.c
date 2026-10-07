@@ -142,18 +142,55 @@ static ll_port_error http_post(ll_http_client *c,
     return *token_out ? LL_PORT_OK : LL_PORT_ERR_NETWORK;
 }
 
+#ifndef LATTE_VERSION
+#error "LATTE_VERSION must be defined by the build (CMakeLists.txt sets it from the project version)"
+#endif
+
+/* Serialises req after adding the "sdk" object, then frees req. */
+static char *finish_body(cJSON *req)
+{
+    if (!req) return NULL;
+    cJSON *sdk = cJSON_AddObjectToObject(req, "sdk");
+    if (sdk) {
+        cJSON_AddStringToObject(sdk, "language", "c");
+        cJSON_AddStringToObject(sdk, "version",  LATTE_VERSION);
+    }
+    char *body = cJSON_PrintUnformatted(req);
+    cJSON_Delete(req);
+    return body;
+}
+
+char *ll_http_activate_body(const char *project_key,
+                            const char *license_key,
+                            const char *machine_id)
+{
+    cJSON *req = cJSON_CreateObject();
+    if (!req) return NULL;
+    cJSON_AddStringToObject(req, "project_key", project_key);
+    cJSON_AddStringToObject(req, "license_key", license_key);
+    cJSON_AddStringToObject(req, "machine_id",  machine_id);
+    return finish_body(req);
+}
+
+char *ll_http_renew_body(const char *activation_id,
+                         const char *license_key,
+                         const char *machine_id)
+{
+    cJSON *req = cJSON_CreateObject();
+    if (!req) return NULL;
+    cJSON_AddStringToObject(req, "activation_id", activation_id);
+    cJSON_AddStringToObject(req, "license_key",   license_key);
+    cJSON_AddStringToObject(req, "machine_id",    machine_id);
+    return finish_body(req);
+}
+
 ll_port_error ll_http_activate(ll_http_client *c,
                                const char *license_key,
                                const char *machine_id,
                                char **token_out,
                                ll_cert_chain **chain_out)
 {
-    cJSON *req = cJSON_CreateObject();
-    cJSON_AddStringToObject(req, "project_key", c->project_key);
-    cJSON_AddStringToObject(req, "license_key", license_key);
-    cJSON_AddStringToObject(req, "machine_id",  machine_id);
-    char *body = cJSON_PrintUnformatted(req);
-    cJSON_Delete(req);
+    char *body = ll_http_activate_body(c->project_key, license_key, machine_id);
     if (!body) return LL_PORT_ERR_NETWORK;
 
     ll_port_error e = http_post(c, "/v1/activate", body, token_out, chain_out);
@@ -168,12 +205,7 @@ ll_port_error ll_http_renew(ll_http_client *c,
                             char **token_out,
                             ll_cert_chain **chain_out)
 {
-    cJSON *req = cJSON_CreateObject();
-    cJSON_AddStringToObject(req, "activation_id", activation_id);
-    cJSON_AddStringToObject(req, "license_key",   license_key);
-    cJSON_AddStringToObject(req, "machine_id",    machine_id);
-    char *body = cJSON_PrintUnformatted(req);
-    cJSON_Delete(req);
+    char *body = ll_http_renew_body(activation_id, license_key, machine_id);
     if (!body) return LL_PORT_ERR_NETWORK;
 
     ll_port_error e = http_post(c, "/v1/renew", body, token_out, chain_out);

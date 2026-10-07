@@ -25,7 +25,7 @@ struct latte_sdk {
     char               app_key[33];      /* 32-char segment + NUL */
     char               store_path[512];
     char               machine_id[65];   /* 64-char hex + NUL */
-    unsigned char      master_pub[32];
+    unsigned char      master_pubs[LATTE_MASTER_PUBKEY_COUNT * 32];
     ll_http_client    *http;
 
     /* Background renewal state */
@@ -174,7 +174,7 @@ static void *renew_thread_fn(void *arg)
     {
         ll_license *lic2 = NULL;
         ll_port_error ve = LL_PORT_OK;
-        if (ll_verify_activation(sdk->master_pub, token, chain, &lic2, &ve) < 0) {
+        if (ll_verify_activation_any(sdk->master_pubs, LATTE_MASTER_PUBKEY_COUNT, token, chain, &lic2, &ve) < 0) {
             free(token); ll_cert_chain_free(chain);
             goto done;
         }
@@ -291,8 +291,13 @@ latte_status latte_new(const latte_config *config, latte_sdk **out)
     strncpy(sdk->app_id, app_id, sizeof(sdk->app_id) - 1);
     strncpy(sdk->app_key, app_key, 32);
 
-    if (hex_decode(LATTE_MASTER_PUBKEY_HEX, sdk->master_pub, 32) < 0) {
-        free(sdk); return LATTE_ERR_INTERNAL;
+    static const char *const master_hex[] = LATTE_MASTER_PUBKEYS_HEX;
+    _Static_assert(sizeof(master_hex) / sizeof(master_hex[0]) == LATTE_MASTER_PUBKEY_COUNT,
+                   "LATTE_MASTER_PUBKEY_COUNT must match LATTE_MASTER_PUBKEYS_HEX");
+    for (size_t i = 0; i < LATTE_MASTER_PUBKEY_COUNT; i++) {
+        if (hex_decode(master_hex[i], sdk->master_pubs + 32 * i, 32) < 0) {
+            free(sdk); return LATTE_ERR_INTERNAL;
+        }
     }
 
     char store_path[512];
@@ -349,7 +354,7 @@ latte_status latte_activate(latte_sdk *sdk, const char *key, latte_license **out
     if (ll_file_load_token(sdk->store_path, &raw_token, &chain) == 0) {
         ll_license *lic = NULL;
         ll_port_error ve = LL_PORT_OK;
-        if (ll_verify_activation(sdk->master_pub, raw_token, chain, &lic, &ve) == 0) {
+        if (ll_verify_activation_any(sdk->master_pubs, LATTE_MASTER_PUBKEY_COUNT, raw_token, chain, &lic, &ve) == 0) {
             if (ll_validate(lic, sdk->machine_id) == LL_PORT_OK) {
                 maybe_start_renew(sdk, lic);
                 int key_matches = lic->key && strcmp(lic->key, sanitized) == 0;
@@ -377,7 +382,7 @@ latte_status latte_activate(latte_sdk *sdk, const char *key, latte_license **out
 
     ll_license *lic = NULL;
     ll_port_error ve = LL_PORT_OK;
-    if (ll_verify_activation(sdk->master_pub, raw_token, chain, &lic, &ve) < 0) {
+    if (ll_verify_activation_any(sdk->master_pubs, LATTE_MASTER_PUBKEY_COUNT, raw_token, chain, &lic, &ve) < 0) {
         free(raw_token); ll_cert_chain_free(chain);
         return LATTE_ERR_SERVER_INVALID_TOKEN;
     }
@@ -409,7 +414,7 @@ latte_status latte_check(latte_sdk *sdk, latte_license **out)
 
     ll_license *lic = NULL;
     ll_port_error ve = LL_PORT_OK;
-    if (ll_verify_activation(sdk->master_pub, raw_token, chain, &lic, &ve) < 0) {
+    if (ll_verify_activation_any(sdk->master_pubs, LATTE_MASTER_PUBKEY_COUNT, raw_token, chain, &lic, &ve) < 0) {
         free(raw_token); ll_cert_chain_free(chain);
         if (ve == LL_PORT_ERR_LICENSE_INACTIVE_OR_EXPIRED) return LATTE_ERR_LICENSE_EXPIRED;
         return LATTE_ERR_NOT_ACTIVATED;

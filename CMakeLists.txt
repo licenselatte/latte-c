@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.15)
-project(latte-c VERSION 1.3.0 LANGUAGES C CXX)
+project(latte-c VERSION 1.4.0 LANGUAGES C CXX)
+
+# The version the SDK reports to the API in every request body.
+add_compile_definitions(LATTE_VERSION="${PROJECT_VERSION}")
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -171,6 +174,31 @@ add_executable(test_fixtures
 target_include_directories(test_fixtures PRIVATE include src vendor/cjson ${LIBSODIUM_INCLUDE_DIRS})
 target_link_libraries(test_fixtures PRIVATE cjson ${LIBSODIUM_LIBRARIES})
 add_test(NAME fixtures COMMAND test_fixtures WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# test_http_body
+add_executable(test_http_body
+    tests/test_http_body.c
+    src/http/client.c
+    src/domain.c
+)
+target_include_directories(test_http_body PRIVATE include src vendor/cjson ${LIBCURL_INCLUDE_DIRS})
+target_link_libraries(test_http_body PRIVATE cjson ${LIBCURL_LIBRARIES})
+add_test(NAME http_body COMMAND test_http_body)
+
+# test_anchors
+add_executable(test_anchors
+    tests/test_anchors.c
+    src/verify.c
+    src/validate.c
+    src/domain.c
+    src/entitlements.c
+    src/crypto/base64url.c
+    src/crypto/jwt.c
+    src/crypto/cert.c
+)
+target_include_directories(test_anchors PRIVATE include src vendor/cjson ${LIBSODIUM_INCLUDE_DIRS})
+target_link_libraries(test_anchors PRIVATE cjson ${LIBSODIUM_LIBRARIES})
+add_test(NAME anchors COMMAND test_anchors)
 
 # test_jwt
 add_executable(test_jwt

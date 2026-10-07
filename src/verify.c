@@ -33,6 +33,29 @@ int ll_verify_activation_at(const unsigned char *master_pub,
                             ll_license **out,
                             ll_port_error *err_code)
 {
+    return ll_verify_activation_any_at(master_pub, 1,
+                                       token, chain, now, out, err_code);
+}
+
+int ll_verify_activation_any(const unsigned char *master_pubs,
+                             size_t n_master,
+                             const char *token,
+                             const ll_cert_chain *chain,
+                             ll_license **out,
+                             ll_port_error *err_code)
+{
+    return ll_verify_activation_any_at(master_pubs, n_master, token, chain,
+                                       (int64_t)time(NULL), out, err_code);
+}
+
+int ll_verify_activation_any_at(const unsigned char *master_pubs,
+                                size_t n_master,
+                                const char *token,
+                                const ll_cert_chain *chain,
+                                int64_t now,
+                                ll_license **out,
+                                ll_port_error *err_code)
+{
     *out = NULL;
     *err_code = LL_PORT_ERR_INVALID_LICENSE;
 
@@ -40,8 +63,12 @@ int ll_verify_activation_at(const unsigned char *master_pub,
     cJSON *sub_claims = NULL, *proj_claims = NULL,
           *daily_claims = NULL, *act_claims = NULL;
 
-    /* Step 1: verify submaster cert (signed by master) → extract spk */
-    if (ll_verify_cert(master_pub, chain->submaster, now, &sub_claims) < 0)
+    /* Step 1: verify submaster cert (signed by any trusted master) → extract spk */
+    for (size_t i = 0; i < n_master; i++) {
+        if (ll_verify_cert(master_pubs + 32 * i, chain->submaster, now, &sub_claims) == 0)
+            break;
+    }
+    if (!sub_claims)
         goto fail;
     if (ll_pubkey_from_cert(sub_claims, "spk", submaster_pub) < 0)
         goto fail;

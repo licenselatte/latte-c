@@ -32,4 +32,18 @@ ll_port_error ll_http_renew(ll_http_client *c,
                             char **token_out,
                             ll_cert_chain **chain_out);
 
+/*
+ * ll_http_activate_body / ll_http_renew_body:
+ *   The JSON request bodies for POST /v1/activate and POST /v1/renew. Both
+ *   carry "sdk": {"language": "c", "version": LATTE_VERSION} so the API can
+ *   tell which SDK release sent them. Heap-allocated (caller frees), NULL on
+ *   allocation failure.
+ */
+char *ll_http_activate_body(const char *project_key,
+                            const char *license_key,
+                            const char *machine_id);
+char *ll_http_renew_body(const char *activation_id,
+                         const char *license_key,
+                         const char *machine_id);
+
 #endif /* LATTE_HTTP_CLIENT_H */
