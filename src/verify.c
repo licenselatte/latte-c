@@ -99,8 +99,31 @@ int ll_verify_activation_any_at(const unsigned char *master_pubs,
     int64_t exp = ll_jwt_int64_claim(act_claims, "exp", &exp_ok);
     if (!iat_ok || !exp_ok) goto fail;
 
-    int grc_ok = 0;
-    int64_t grc = ll_jwt_int64_claim(act_claims, "grc", &grc_ok);
+    /*
+     * Two token formats, told apart by the presence of grc and nothing else.
+     * With grc, exp is the licence's end and the offline deadline is
+     * iat + grc. Without it (the lex format), exp is the offline deadline
+     * itself and lex, when present, is the licence's end. Either way the
+     * result is expires_at (hard end) and grace_period (offline window from
+     * iat), so validate.c applies one set of rules. exp is not held against
+     * now here; validate.c does that.
+     */
+    int has_grc = cJSON_GetObjectItemCaseSensitive(act_claims, "grc") != NULL;
+    int64_t expires_at, grace_period;
+    if (has_grc) {
+        int grc_ok = 0;
+        int64_t grc = ll_jwt_int64_claim(act_claims, "grc", &grc_ok);
+        if (grc_ok && grc > LATTE_MAX_GRACE_SECS) goto fail;
+        expires_at   = exp;
+        grace_period = grc_ok ? grc : 0;
+    } else {
+        int lex_ok = 0;
+        int64_t lex = ll_jwt_int64_claim(act_claims, "lex", &lex_ok);
+        if (!lex_ok && cJSON_GetObjectItemCaseSensitive(act_claims, "lex"))
+            goto fail;
+        expires_at   = lex_ok ? lex : LATTE_NO_EXPIRY;
+        grace_period = exp - iat;
+    }
 
     /* Cross-check: pid in JWT must match pid in project cert */
     const char *pid_jwt  = ll_jwt_string_claim(act_claims, "pid");
@@ -121,9 +144,6 @@ int ll_verify_activation_any_at(const unsigned char *master_pubs,
     if (!daily_exp_ok) goto fail;
     if (iat > daily_exp) goto fail;
 
-    /* Cross-check: grace period not too long */
-    if (grc_ok && grc > LATTE_MAX_GRACE_SECS) goto fail;
-
     /* Build output */
     ll_license *lic = (ll_license *)calloc(1, sizeof(ll_license));
     if (!lic) goto fail;
@@ -135,8 +155,8 @@ int ll_verify_activation_any_at(const unsigned char *master_pubs,
     lic->machine_id_hash= strdup_safe(ll_jwt_string_claim(act_claims, "mid"));
     lic->license_type   = strdup_safe(ll_jwt_string_claim(act_claims, "ltype"));
     lic->issued_at      = iat;
-    lic->expires_at     = exp;
-    lic->grace_period   = grc_ok ? grc : 0;
+    lic->expires_at     = expires_at;
+    lic->grace_period   = grace_period;
 
     /* Extract pmd metadata (string→string map) */
     cJSON *pmd = cJSON_GetObjectItemCaseSensitive(act_claims, "pmd");

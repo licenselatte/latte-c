@@ -584,8 +584,19 @@ issued_at ───────────────────────�
 
 Two cases result in expiry:
 
-1. **Collision** — `issued_at + grace_period > expires_at`: the grace window extends past the license hard expiry. The SDK treats this as expired immediately.
-2. **Offline too long** — `now > issued_at + grace_period`: the device has been offline longer than the window. The user must reconnect to receive a fresh token.
+1. **Licence ended**: `now > expires_at`. `latte_check` returns `LATTE_ERR_LICENSE_EXPIRED`, whatever the offline window says.
+2. **Offline too long**: `now > issued_at + grace_period`. The device has been offline longer than the window. The user must reconnect to receive a fresh token.
+
+### Token formats
+
+The SDK reads two activation token formats, told apart by whether the token carries a `grc` claim:
+
+| Claims            | `expires_at`                                   | `grace_period_seconds` |
+| ----------------- | ---------------------------------------------- | ---------------------- |
+| with `grc`        | `exp`                                          | `grc`                  |
+| without `grc`     | `lex`, or 2099-01-01T00:00:00Z when absent     | `exp - iat`            |
+
+In the second format `exp` is the offline deadline itself, already capped at the licence's end, and `lex` is the licence's end date (absent for a perpetual licence). Both formats fill the same two fields, so the rules above apply unchanged, and a perpetual licence reports `expires_at` = `4070908800` in either. A cached token is stored as the signed token and re-read the same way on every load.
 
 `lic->in_grace_period` is `1` once the device has been offline longer than 60 minutes but the deadline has not passed. Use it to surface a "please reconnect" banner.
 

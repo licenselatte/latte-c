@@ -33,8 +33,8 @@ typedef struct {
     char    *machine_id_hash;/* mid */
     char    *license_type;   /* ltype */
     int64_t  issued_at;      /* iat (Unix seconds) */
-    int64_t  expires_at;     /* exp (Unix seconds) */
-    int64_t  grace_period;   /* grc (seconds) */
+    int64_t  expires_at;     /* licence end, Unix seconds: exp with grc, else lex or LATTE_NO_EXPIRY */
+    int64_t  grace_period;   /* offline window from iat, seconds: grc, else exp - iat */
 
     /* pmd sub-object: flat string→string map */
     size_t   metadata_count;

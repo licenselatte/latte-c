@@ -42,6 +42,11 @@
 #define LATTE_MAX_GRACE_SECS     (90 * 24 * 3600)  /* 90 days */
 #define LATTE_MAX_AGE_SECS       (365 * 24 * 3600) /* 1 year  */
 
+/* expires_at of a licence with no end date: 2099-01-01T00:00:00Z, the exp a
+ * grc-format token carries for a perpetual licence. A lex-format token
+ * without `lex` is given the same value. */
+#define LATTE_NO_EXPIRY          INT64_C(4070908800)
+
 /* License type strings */
 #define LATTE_TYPE_PERPETUAL       "perpetual"
 #define LATTE_TYPE_EXPIRING        "expiring"
