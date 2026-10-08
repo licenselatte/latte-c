@@ -43,7 +43,6 @@
 #define LATTE_MAX_AGE_SECS       (365 * 24 * 3600) /* 1 year  */
 
 /* License type strings */
-#define LATTE_TYPE_PERPETUAL_FIXED "perpetual_fixed"
 #define LATTE_TYPE_PERPETUAL       "perpetual"
 #define LATTE_TYPE_EXPIRING        "expiring"
 

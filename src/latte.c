@@ -113,10 +113,6 @@ static int should_try_renew(latte_sdk *sdk, const ll_license *lic)
 {
     ll_mutex_lock(&sdk->renew_mu);
 
-    if (lic->license_type && strcmp(lic->license_type, LATTE_TYPE_PERPETUAL_FIXED) == 0) {
-        ll_mutex_unlock(&sdk->renew_mu);
-        return 0;
-    }
     if (sdk->renew_in_flight) {
         ll_mutex_unlock(&sdk->renew_mu);
         return 0;

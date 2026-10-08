@@ -183,7 +183,7 @@ Type your license key (e.g. XXXXX-XXXXX-XXXXX-XXXXX-XXXXXX):
 License activated!
   Key:          G98S8BWAR6Y0Z7FJT10A7EWD933265
   ActivationID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-  LicenseType:  perpetual_fixed
+  LicenseType:  perpetual
   IssuedAt:     1700000000
   ExpiresAt:    4102444800
   InGracePeriod:0
@@ -404,9 +404,9 @@ typedef struct {
     char    *key;                  /* raw license key, no hyphens */
     char    *activation_id;        /* server UUID for this machine's slot */
     char    *project_id;           /* UUID of the owning project */
-    char    *license_type;         /* "perpetual_fixed" | "perpetual" | "expiring" */
+    char    *license_type;         /* "perpetual" | "expiring" */
     int64_t  issued_at;            /* Unix timestamp — when the token was issued */
-    int64_t  expires_at;           /* Unix timestamp — hard expiry (year 2099 for perpetual_fixed) */
+    int64_t  expires_at;           /* Unix timestamp of the hard expiry */
     int64_t  grace_period_seconds; /* offline tolerance window from issued_at */
     int      in_grace_period;      /* 1 → offline > 60 min; show "please reconnect" */
     size_t   metadata_count;       /* number of custom metadata key-value pairs */
@@ -562,13 +562,10 @@ int main(void)
 
 ## License types
 
-| Type              | Expiry            | Renewal               | Revocable |
-| ----------------- | ----------------- | --------------------- | --------- |
-| `perpetual_fixed` | Never (year 2099) | Never                 | No        |
-| `perpetual`       | Never             | Periodic (background) | Yes       |
-| `expiring`        | Set by policy     | Periodic (background) | Yes       |
-
-**`perpetual_fixed`** tokens are irrevocable one-time activations. The server signs a token that expires in 2099; the SDK never contacts the API again after the first activation. There is no grace period — the token is simply valid until 2099.
+| Type          | Expiry        | Renewal               | Revocable |
+| ------------- | ------------- | --------------------- | --------- |
+| `perpetual`   | Never         | Periodic (background) | Yes       |
+| `expiring`    | Set by policy | Periodic (background) | Yes       |
 
 **`perpetual`** and **`expiring`** licenses use a rolling-renewal model. The SDK renews the cached token in the background every 5–60 minutes. The grace period gives the device a buffer to operate offline if renewal fails.
 
@@ -621,8 +618,6 @@ When `latte_activate` or `latte_check` returns a valid cached token, the SDK may
 Renewal happens after the token is older than 60 minutes (randomised jitter between 5 and 60 minutes at the SDK level). Renewal errors are silently ignored — the existing token remains valid until its grace period elapses.
 
 If the server returns an invalid-license response during renewal (e.g. the license was revoked), the stored token is wiped so the next `latte_check` returns `LATTE_ERR_NOT_ACTIVATED`.
-
-`perpetual_fixed` licenses skip renewal entirely: the token is permanent.
 
 `latte_free` waits for any in-flight renewal thread before returning, so there is no risk of use-after-free.
 

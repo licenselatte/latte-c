@@ -41,21 +41,6 @@ int main(void)
         CHECK(ll_validate(&l, mid) == LL_PORT_OK, "happy path: perpetual");
     }
 
-    /* perpetual_fixed: only checks hard expiry, no grc */
-    {
-        ll_license l = make_lic(LATTE_TYPE_PERPETUAL_FIXED, -100,
-                                 365*24*3600, 1 /* irrelevant, but must be > 0 */);
-        CHECK(ll_validate(&l, mid) == LL_PORT_OK, "perpetual_fixed: future exp");
-    }
-
-    /* perpetual_fixed: past expiry → expired */
-    {
-        ll_license l = make_lic(LATTE_TYPE_PERPETUAL_FIXED, -200,
-                                 -100, 1);
-        CHECK(ll_validate(&l, mid) == LL_PORT_ERR_LICENSE_INACTIVE_OR_EXPIRED,
-              "perpetual_fixed: past exp → expired");
-    }
-
     /* Expired: now > expires_at */
     {
         ll_license l = make_lic(LATTE_TYPE_EXPIRING, -3600*48,

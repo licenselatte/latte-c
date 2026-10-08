@@ -43,13 +43,6 @@ ll_port_error ll_validate_at(const ll_license *lic, const char *machine_id,
     if (lic->expires_at < lic->issued_at)
         return LL_PORT_ERR_INVALID_LICENSE;
 
-    /* perpetual_fixed: only check hard expiry */
-    if (lic->license_type && strcmp(lic->license_type, LATTE_TYPE_PERPETUAL_FIXED) == 0) {
-        if (now > lic->expires_at)
-            return LL_PORT_ERR_LICENSE_INACTIVE_OR_EXPIRED;
-        return LL_PORT_OK;
-    }
-
     int64_t offline_deadline = lic->issued_at + lic->grace_period;
 
     if (now > lic->expires_at)
