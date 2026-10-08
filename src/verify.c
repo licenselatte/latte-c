@@ -113,7 +113,6 @@ int ll_verify_activation_any_at(const unsigned char *master_pubs,
     if (has_grc) {
         int grc_ok = 0;
         int64_t grc = ll_jwt_int64_claim(act_claims, "grc", &grc_ok);
-        if (grc_ok && grc > LATTE_MAX_GRACE_SECS) goto fail;
         expires_at   = exp;
         grace_period = grc_ok ? grc : 0;
     } else {
@@ -124,6 +123,7 @@ int ll_verify_activation_any_at(const unsigned char *master_pubs,
         expires_at   = lex_ok ? lex : LATTE_NO_EXPIRY;
         grace_period = exp - iat;
     }
+    if (grace_period > LATTE_MAX_GRACE_SECS) goto fail;
 
     /* Cross-check: pid in JWT must match pid in project cert */
     const char *pid_jwt  = ll_jwt_string_claim(act_claims, "pid");
