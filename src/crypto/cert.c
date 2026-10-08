@@ -12,10 +12,11 @@ static int hex_val(char c)
     return -1;
 }
 
-int ll_verify_cert(const unsigned char *parent_pub,
-                   const char *cert_jwt,
-                   int64_t now,
-                   cJSON **claims_out)
+static int verify_cert(const unsigned char *parent_pub,
+                       const char *cert_jwt,
+                       int64_t now,
+                       int check_exp,
+                       cJSON **claims_out)
 {
     cJSON *claims = NULL;
     if (ll_jwt_verify_ed25519(cert_jwt, parent_pub, 32, &claims) < 0)
@@ -26,14 +27,15 @@ int ll_verify_cert(const unsigned char *parent_pub,
      * contract golang-jwt/v5 applies in latte-go's crypto.VerifyCert, which
      * passes WithIssuedAt() and a time func but no WithLeeway.
      *
-     *   exp: expired when now > exp   (strictly after, not at)
+     *   exp: expired when now > exp   (strictly after, not at); skipped
+     *        when check_exp is 0
      *   nbf: not yet valid when now < nbf
      *   iat: not yet valid when now < iat -- a cert cannot have been issued
      *        in the future, which is the check WithIssuedAt() turns on.
      */
     int ok = 0;
     int64_t exp = ll_jwt_int64_claim(claims, "exp", &ok);
-    if (ok && now > exp) goto reject;
+    if (check_exp && ok && now > exp) goto reject;
 
     ok = 0;
     int64_t nbf = ll_jwt_int64_claim(claims, "nbf", &ok);
@@ -50,6 +52,22 @@ reject:
     cJSON_Delete(claims);
     *claims_out = NULL;
     return -1;
+}
+
+int ll_verify_cert(const unsigned char *parent_pub,
+                   const char *cert_jwt,
+                   int64_t now,
+                   cJSON **claims_out)
+{
+    return verify_cert(parent_pub, cert_jwt, now, 1, claims_out);
+}
+
+int ll_verify_cert_ignoring_expiry(const unsigned char *parent_pub,
+                                   const char *cert_jwt,
+                                   int64_t now,
+                                   cJSON **claims_out)
+{
+    return verify_cert(parent_pub, cert_jwt, now, 0, claims_out);
 }
 
 int ll_pubkey_from_cert(const cJSON *claims, const char *field,

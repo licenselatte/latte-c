@@ -200,6 +200,21 @@ target_include_directories(test_anchors PRIVATE include src vendor/cjson ${LIBSO
 target_link_libraries(test_anchors PRIVATE cjson ${LIBSODIUM_LIBRARIES})
 add_test(NAME anchors COMMAND test_anchors)
 
+# test_daily_cert
+add_executable(test_daily_cert
+    tests/test_daily_cert.c
+    src/verify.c
+    src/validate.c
+    src/domain.c
+    src/entitlements.c
+    src/crypto/base64url.c
+    src/crypto/jwt.c
+    src/crypto/cert.c
+)
+target_include_directories(test_daily_cert PRIVATE include src vendor/cjson ${LIBSODIUM_INCLUDE_DIRS})
+target_link_libraries(test_daily_cert PRIVATE cjson ${LIBSODIUM_LIBRARIES})
+add_test(NAME daily_cert COMMAND test_daily_cert)
+
 # test_jwt
 add_executable(test_jwt
     tests/test_jwt.c

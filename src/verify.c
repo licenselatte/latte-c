@@ -79,8 +79,12 @@ int ll_verify_activation_any_at(const unsigned char *master_pubs,
     if (ll_pubkey_from_cert(proj_claims, "ppk", project_pub) < 0)
         goto fail;
 
-    /* Step 3: verify daily cert (signed by project key) → extract dpk */
-    if (ll_verify_cert(project_pub, chain->daily, now, &daily_claims) < 0)
+    /*
+     * Step 3: verify daily cert (signed by project key) → extract dpk.
+     * Its exp is not held against now; the cross-checks below bound the
+     * activation's iat by the cert's window instead.
+     */
+    if (ll_verify_cert_ignoring_expiry(project_pub, chain->daily, now, &daily_claims) < 0)
         goto fail;
     if (ll_pubkey_from_cert(daily_claims, "dpk", daily_pub) < 0)
         goto fail;
@@ -110,7 +114,8 @@ int ll_verify_activation_any_at(const unsigned char *master_pubs,
     if (!daily_iat_ok) goto fail;
     if (iat < daily_iat) goto fail;
 
-    /* Cross-check: activation iat <= daily cert exp */
+    /* Cross-check: activation iat <= daily cert exp, so a daily key cannot
+     * sign tokens dated after its own day. */
     int daily_exp_ok = 0;
     int64_t daily_exp = ll_jwt_int64_claim(daily_claims, "exp", &daily_exp_ok);
     if (!daily_exp_ok) goto fail;

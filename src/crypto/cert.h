@@ -26,6 +26,19 @@ int ll_verify_cert(const unsigned char *parent_pub,
                    cJSON **claims_out);
 
 /*
+ * ll_verify_cert_ignoring_expiry:
+ *   ll_verify_cert without the exp check: signature, alg, issuer, nbf and
+ *   iat are enforced exactly as above, but the cert may have expired. Used
+ *   for the daily cert only, which expires the morning after it is issued
+ *   while the token it signed must verify offline for its whole grace
+ *   period. The caller bounds the token by the cert's window instead.
+ */
+int ll_verify_cert_ignoring_expiry(const unsigned char *parent_pub,
+                                   const char *cert_jwt,
+                                   int64_t now,
+                                   cJSON **claims_out);
+
+/*
  * ll_pubkey_from_cert:
  *   Extract a 32-byte Ed25519 public key from a hex claim named `field`.
  *   pub_out must be at least 32 bytes.  Returns 0 on success.
