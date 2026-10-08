@@ -175,6 +175,28 @@ latte_config *latte_config_new(const char *app_id);
  */
 latte_config *latte_config_set_multi_instance(latte_config *cfg, int multi_instance);
 
+/*
+ * latte_config_set_machine_id - supply the raw machine ID yourself.
+ *
+ * By default the SDK reads the OS machine ID (IOPlatformUUID on macOS,
+ * /var/lib/dbus/machine-id or /etc/machine-id on Linux, MachineGuid on
+ * Windows). Either way it sends only
+ *   HMAC-SHA256(key = raw ID, msg = "licenselatte_" + app_id)
+ * as lowercase hex; the raw ID never leaves the machine. raw_machine_id
+ * is used byte for byte, with no trimming, and copied internally.
+ *
+ * Set it when the OS ID does not identify the seat you want to license:
+ * containers that share an image's /etc/machine-id or have none, cloned
+ * VMs that share one, a seat per user rather than per machine (pass a
+ * stable user ID), or tests. Keep it stable: changing it on an activated
+ * install makes that install a new machine, which takes another seat.
+ *
+ * NULL or "" clears it, so the OS ID is used. Returns cfg, for chaining.
+ * No-op if cfg is NULL. If the copy cannot be allocated, latte_new()
+ * returns LATTE_ERR_INTERNAL rather than silently using the OS ID.
+ */
+latte_config *latte_config_set_machine_id(latte_config *cfg, const char *raw_machine_id);
+
 /* Release a config built with latte_config_new(). */
 void latte_config_free(latte_config *cfg);
 
@@ -191,7 +213,7 @@ void latte_config_free(latte_config *cfg);
  *         LATTE_ERR_INVALID_APPID / _CHECKSUM if app_id is malformed,
  *         LATTE_ERR_STORAGE_INIT_FAILED if the token directory cannot be
  * created, LATTE_ERR_MACHINE_ID_FAILED if the machine fingerprint cannot be
- * read.
+ * read (only when no machine ID was set with latte_config_set_machine_id()).
  */
 latte_status latte_new(const latte_config *config, latte_sdk **out);
 

@@ -15,7 +15,7 @@
  * Then apply trim() = TrimSpace(Trim(s, "\n")).
  */
 static int get_raw_machine_id(char *out, size_t out_size) {
-  FILE *fp = popen("ioreg -rd1 -c IOPlatformExpertDevice", "r");
+  FILE *fp = popen("/usr/sbin/ioreg -rd1 -c IOPlatformExpertDevice", "r");
   if (!fp)
     return -1;
 
@@ -116,23 +116,18 @@ static int get_raw_machine_id(char *out, size_t out_size) {
 
 /* --- HMAC-SHA256 protect ------------------------------------------------- */
 
-/*
- * protect(appID, id) = HMAC-SHA256(key=id_bytes, msg=appID_bytes), hex-encoded.
- * Must match denisbrodbeck/machineid protect() exactly.
- */
-static int protect(const char *app_id, const char *machine_id, char *out) {
+int ll_machine_id_hash(const char *raw_machine_id, const char *app_id, char *out) {
+  static const char prefix[] = "licenselatte_";
   unsigned char mac[crypto_auth_hmacsha256_BYTES];
   crypto_auth_hmacsha256_state state;
 
-  if (crypto_auth_hmacsha256_init(&state, (const unsigned char *)machine_id,
-                                  strlen(machine_id)) != 0)
-    return -1;
-
-  if (crypto_auth_hmacsha256_update(&state, (const unsigned char *)app_id,
-                                    strlen(app_id)) != 0)
-    return -1;
-
-  if (crypto_auth_hmacsha256_final(&state, mac) != 0)
+  if (crypto_auth_hmacsha256_init(&state, (const unsigned char *)raw_machine_id,
+                                  strlen(raw_machine_id)) != 0 ||
+      crypto_auth_hmacsha256_update(&state, (const unsigned char *)prefix,
+                                    sizeof(prefix) - 1) != 0 ||
+      crypto_auth_hmacsha256_update(&state, (const unsigned char *)app_id,
+                                    strlen(app_id)) != 0 ||
+      crypto_auth_hmacsha256_final(&state, mac) != 0)
     return -1;
 
   for (int i = 0; i < (int)crypto_auth_hmacsha256_BYTES; i++)
@@ -147,5 +142,5 @@ int ll_machine_id_protected(const char *app_id, char *out) {
   char raw[512];
   if (get_raw_machine_id(raw, sizeof(raw)) < 0)
     return -1;
-  return protect(app_id, raw, out);
+  return ll_machine_id_hash(raw, app_id, out);
 }

@@ -175,6 +175,12 @@ target_include_directories(test_fixtures PRIVATE include src vendor/cjson ${LIBS
 target_link_libraries(test_fixtures PRIVATE cjson ${LIBSODIUM_LIBRARIES})
 add_test(NAME fixtures COMMAND test_fixtures WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+# test_machine_id: testdata/machine_id.json through the shared hash.
+add_executable(test_machine_id tests/test_machine_id.c src/machineid.c)
+target_include_directories(test_machine_id PRIVATE include src vendor/cjson ${LIBSODIUM_INCLUDE_DIRS})
+target_link_libraries(test_machine_id PRIVATE cjson ${LIBSODIUM_LIBRARIES})
+add_test(NAME machine_id COMMAND test_machine_id WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 # test_http_body
 add_executable(test_http_body
     tests/test_http_body.c

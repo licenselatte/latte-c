@@ -159,6 +159,7 @@ Individual test binaries can be run directly for verbose output:
 ./build/test_jwt           # base64url decode and EdDSA JWT verify
 ./build/test_entitlements  # entitlement decoding and the can/limit accessors
 ./build/test_fixtures      # the 29 shared latte-testvectors fixtures
+./build/test_machine_id    # testdata/machine_id.json through the shared hash (run from the source dir)
 ```
 
 `test_fixtures` is the cross-language parity check: it runs the identical
@@ -278,6 +279,7 @@ typedef struct latte_config latte_config; /* opaque, built with a builder */
 
 latte_config *latte_config_new(const char *app_id);
 latte_config *latte_config_set_multi_instance(latte_config *cfg, int multi_instance);
+latte_config *latte_config_set_machine_id(latte_config *cfg, const char *raw_machine_id);
 void          latte_config_free(latte_config *cfg);
 
 latte_status latte_new(const latte_config *config, latte_sdk **out);
@@ -306,7 +308,7 @@ latte_config_free(cfg);
 | `LATTE_ERR_INVALID_APPID_KEY_SEGMENT` | 32-char segment has the wrong length                |
 | `LATTE_ERR_INVALID_APPID_CHECKSUM`    | Built-in checksum mismatch — likely a typo          |
 | `LATTE_ERR_STORAGE_INIT_FAILED`       | Token directory could not be created                |
-| `LATTE_ERR_MACHINE_ID_FAILED`         | OS machine UUID is unavailable                      |
+| `LATTE_ERR_MACHINE_ID_FAILED`         | OS machine UUID is unavailable (and none was set)   |
 
 #### Multiple licensed instances of the same app
 
@@ -317,6 +319,29 @@ latte_config *cfg = latte_config_set_multi_instance(latte_config_new("pk_live_..
 ```
 
 The working directory itself is the instance boundary: the token is stored at `.licenselatte/{app_key}.latte` relative to the CWD instead of the shared OS config directory, which is never read or written in this mode. Give each instance its own directory (e.g. one per portable install) and they stay independent automatically — no id to generate or manage.
+
+#### Machine ID
+
+A licence seat is bound to a `machine_id`. The SDK never sends the raw machine ID: it sends
+
+```
+machine_id = lowercase hex HMAC-SHA256(key = raw machine ID, message = "licenselatte_" + app_id)
+```
+
+which is `denisbrodbeck/machineid`'s `ProtectedID`, so every LicenseLatte SDK derives the same value for the same raw ID and app. By default the raw ID is read from the OS: `IOPlatformUUID` on macOS, `/var/lib/dbus/machine-id` or `/etc/machine-id` on Linux, `MachineGuid` on Windows.
+
+Call `latte_config_set_machine_id(cfg, raw)` to supply the raw ID yourself. It goes through the same hash, byte for byte with no trimming, and still never leaves the machine. Set it when the OS ID does not identify the seat you mean to license:
+
+- containers that share an image's `/etc/machine-id`, or have none at all;
+- cloned VMs that all carry the same ID;
+- a seat per user rather than per machine (pass a stable user ID);
+- tests that need a deterministic machine.
+
+```c
+latte_config *cfg = latte_config_set_machine_id(latte_config_new("pk_live_..."), "user-8412");
+```
+
+`NULL` or `""` means unset, so the OS ID is used and behaviour is the default. Keep the value stable: changing it on an activated install makes that install a new machine, which takes another seat. If the copy cannot be allocated, `latte_new()` returns `LATTE_ERR_INTERNAL` instead of falling back to the OS ID. The shared vectors in `testdata/machine_id.json` pin the hash.
 
 
 ### latte_activate
@@ -462,7 +487,7 @@ int main()
 
 | Class            | Wraps          | Notes                                                                 |
 | ----------------- | -------------- | ---------------------------------------------------------------------- |
-| `latte::Config`    | `latte_config` | Constructor takes `app_id`; `set_multi_instance(bool)` chains          |
+| `latte::Config`    | `latte_config` | Constructor takes `app_id`; `set_multi_instance(bool)` and `set_machine_id(std::string)` chain |
 | `latte::Sdk`       | `latte_sdk`    | Constructor throws `latte::Error`; `activate()` / `check()` return `License` |
 | `latte::License`   | `latte_license`| Accessors (`key()`, `license_type()`, `metadata()`, …) instead of struct fields |
 | `latte::Error`     | `latte_status` | `std::runtime_error`; `.status()` returns the original `latte_status`  |
@@ -755,7 +780,7 @@ The `app_id` prefix determines which API endpoint the SDK uses:
 `latte-c` and `latte-go` are wire-compatible:
 
 - **Same on-disk format** — the `.latte` JSON record is identical between SDKs. A token cached by one can be read by the other.
-- **Same machine fingerprint** — the HMAC-SHA256 machine ID (`denisbrodbeck/machineid` algorithm) is replicated exactly, so server-issued tokens bind to the same machine identity regardless of which SDK activated them.
+- **Same machine fingerprint**: the HMAC-SHA256 machine ID (`denisbrodbeck/machineid` algorithm, see [Machine ID](#machine-id)) is replicated exactly, whether the raw ID comes from the OS or from `latte_config_set_machine_id()`, so server-issued tokens bind to the same machine identity regardless of which SDK activated them.
 - **Same cert chain** — both SDKs walk the same master → submaster → project → daily → JWT hierarchy.
 
 To verify cross-SDK parity, activate with `latte-go`'s `cmd/sdktest` then run `latte-c`'s `build/sdktest` (or vice versa) using the same `AppID` — both should read and accept the cached `.latte` file.
@@ -773,7 +798,7 @@ src/
   domain.{c,h}                 Internal license + cert_chain structs
   constants.h                  URLs, keys, timing constants
   errors.{c,h}                 Status codes and port-level error mapping
-  machineid.c                  Platform machine UUID + HMAC-SHA256 protect()
+  machineid.c                  Platform machine UUID + the shared HMAC-SHA256 hash
   thread.{c,h}                 pthreads / Win32 wrapper for renewal thread
   validate.{c,h}               Grace-period and expiry rules
   verify.{c,h}                 4-step Ed25519 cert-chain verification

@@ -232,6 +232,8 @@ static void maybe_start_renew(latte_sdk *sdk, const ll_license *lic)
 struct latte_config {
     char *app_id;
     int   multi_instance;
+    char *machine_id;        /* raw override; NULL means read the OS ID */
+    int   machine_id_failed; /* the override could not be copied */
 };
 
 latte_config *latte_config_new(const char *app_id)
@@ -250,10 +252,24 @@ latte_config *latte_config_set_multi_instance(latte_config *cfg, int multi_insta
     return cfg;
 }
 
+latte_config *latte_config_set_machine_id(latte_config *cfg, const char *raw_machine_id)
+{
+    if (!cfg) return cfg;
+    free(cfg->machine_id);
+    cfg->machine_id = NULL;
+    cfg->machine_id_failed = 0;
+    if (raw_machine_id && raw_machine_id[0]) {
+        cfg->machine_id = strdup_safe(raw_machine_id);
+        if (!cfg->machine_id) cfg->machine_id_failed = 1;
+    }
+    return cfg;
+}
+
 void latte_config_free(latte_config *cfg)
 {
     if (!cfg) return;
     free(cfg->app_id);
+    free(cfg->machine_id);
     free(cfg);
 }
 
@@ -265,6 +281,7 @@ latte_status latte_new(const latte_config *config, latte_sdk **out)
 {
     *out = NULL;
     if (!config || !config->app_id) return LATTE_ERR_INVALID_CONFIG;
+    if (config->machine_id_failed) return LATTE_ERR_INTERNAL;
     const char *app_id = config->app_id;
 
     if (sodium_init() < 0) return LATTE_ERR_INTERNAL;
@@ -305,10 +322,11 @@ latte_status latte_new(const latte_config *config, latte_sdk **out)
     }
     strncpy(sdk->store_path, store_path, sizeof(sdk->store_path) - 1);
 
-    /* Compute machine fingerprint: HMAC-SHA256(key=machine_id, msg="licenselatte_"+AppID) */
-    char protect_key[256];
-    snprintf(protect_key, sizeof(protect_key), "licenselatte_%s", app_id);
-    if (ll_machine_id_protected(protect_key, sdk->machine_id) < 0) {
+    /* Machine fingerprint: HMAC-SHA256(key=raw machine ID, msg="licenselatte_"+AppID) */
+    int mid_rc = config->machine_id
+        ? ll_machine_id_hash(config->machine_id, app_id, sdk->machine_id)
+        : ll_machine_id_protected(app_id, sdk->machine_id);
+    if (mid_rc < 0) {
         free(sdk); return LATTE_ERR_MACHINE_ID_FAILED;
     }
 

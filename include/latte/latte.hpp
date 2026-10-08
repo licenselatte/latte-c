@@ -148,6 +148,13 @@ public:
     return *this;
   }
 
+  /* See latte_config_set_machine_id() in latte.h. Empty clears it.
+   * Chainable. */
+  Config &set_machine_id(const std::string &raw_machine_id) {
+    latte_config_set_machine_id(cfg_, raw_machine_id.c_str());
+    return *this;
+  }
+
   const latte_config *raw() const noexcept { return cfg_; }
 
 private:
