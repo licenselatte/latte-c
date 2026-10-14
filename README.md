@@ -419,7 +419,7 @@ Releases this machine's seat so the licence can be activated on another machine:
 
 The activation id and licence key come from the cached token, read without verifying it, so a machine whose token has expired can still release its seat; with no cached token the call returns `LATTE_ERR_NOT_ACTIVATED`. A machine that is lost, dead or wiped cannot call this: its seat is released from the seller's customer portal instead.
 
-On plans with the deactivation policy engine the seller may limit releases. A refusal returns `LATTE_ERR_DEACTIVATION_BLOCKED` with `reason`, `message` and `available_at` filled in. The seller may also hold the freed seat until this machine's last token has expired, which `seat_free_at` reports.
+Releases are limited on every plan: a fixed number per licence per year, or on plans with the deactivation policy engine the seller's cooldown and yearly cap. A refusal returns `LATTE_ERR_DEACTIVATION_BLOCKED` with `reason`, `message` and `available_at` filled in. The seller may also hold the freed seat until this machine's last token has expired, which `seat_free_at` reports.
 
 ```c
 latte_deactivate_result res;
@@ -603,7 +603,7 @@ typedef enum {
 } latte_status;
 ```
 
-`LATTE_ERR_DEACTIVATION_BLOCKED` is the seller's deactivation policy refusing a release (a cooldown, or the licence's releases for the year used up); the details are in the `latte_deactivate_result` passed to `latte_deactivate`. It is appended after `LATTE_ERR_INTERNAL`, so no existing value changes.
+`LATTE_ERR_DEACTIVATION_BLOCKED` is a release limit refusing a release (the licence's releases for the year used up, or the seller's cooldown); the details are in the `latte_deactivate_result` passed to `latte_deactivate`. It is appended after `LATTE_ERR_INTERNAL`, so no existing value changes.
 
 ---
 
