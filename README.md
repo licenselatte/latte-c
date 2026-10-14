@@ -24,6 +24,8 @@ Embed license enforcement directly into your C application in a few lines of cod
     - [latte_new](#latte_new)
     - [latte_activate](#latte_activate)
     - [latte_check](#latte_check)
+    - [latte_deactivate](#latte_deactivate)
+    - [latte_machines / latte_rename_machine](#latte_machines--latte_rename_machine)
     - [latte_can / latte_limit / latte_has_entitlements](#latte_can--latte_limit--latte_has_entitlements)
     - [latte_license_free / latte_free](#latte_license_free--latte_free)
     - [latte_strerror](#latte_strerror)
@@ -160,6 +162,7 @@ Individual test binaries can be run directly for verbose output:
 ./build/test_entitlements  # entitlement decoding and the can/limit accessors
 ./build/test_fixtures      # the 29 shared latte-testvectors fixtures
 ./build/test_machine_id    # testdata/machine_id.json through the shared hash (run from the source dir)
+./build/test_machines      # deactivate / machines / rename against a local HTTP stub (POSIX only)
 ```
 
 `test_fixtures` is the cross-language parity check: it runs the identical
@@ -172,7 +175,7 @@ flag and entitlements for every one. It runs from the source directory (not
 
 ## Running the example
 
-The example reads a license key from stdin, calls `latte_activate`, and prints the returned `latte_license`.
+The example reads a license key from stdin, calls `latte_activate`, prints the returned `latte_license` and this licence's machines, then offers to release this machine with `latte_deactivate`.
 
 ```sh
 ./build/example_simple
@@ -280,6 +283,7 @@ typedef struct latte_config latte_config; /* opaque, built with a builder */
 latte_config *latte_config_new(const char *app_id);
 latte_config *latte_config_set_multi_instance(latte_config *cfg, int multi_instance);
 latte_config *latte_config_set_machine_id(latte_config *cfg, const char *raw_machine_id);
+latte_config *latte_config_set_machine_name(latte_config *cfg, const char *name);
 void          latte_config_free(latte_config *cfg);
 
 latte_status latte_new(const latte_config *config, latte_sdk **out);
@@ -343,6 +347,16 @@ latte_config *cfg = latte_config_set_machine_id(latte_config_new("pk_live_..."),
 
 `NULL` or `""` means unset, so the OS ID is used and behaviour is the default. Keep the value stable: changing it on an activated install makes that install a new machine, which takes another seat. If the copy cannot be allocated, `latte_new()` returns `LATTE_ERR_INTERNAL` instead of falling back to the OS ID. The shared vectors in `testdata/machine_id.json` pin the hash.
 
+#### Machine name
+
+A machine is given a name when it activates, shown to the customer by [`latte_machines`](#latte_machines--latte_rename_machine) and in the seller's customer portal, and to you in the dashboard. By default the SDK sends the OS hostname (`gethostname`, or `GetComputerNameA` on Windows), and no name when the hostname cannot be read.
+
+```c
+latte_config *cfg = latte_config_set_machine_name(latte_config_new("pk_live_..."), "Studio Mac");
+```
+
+`""` sends no name at all; `NULL` restores the hostname default. The server stores the name only when the activation is created and silently drops an invalid one, and a name the customer sets later with `latte_rename_machine()` is kept on re-activation. If the copy cannot be allocated, `latte_new()` returns `LATTE_ERR_INTERNAL`.
+
 
 ### latte_activate
 
@@ -384,6 +398,63 @@ Returns `LATTE_ERR_NOT_ACTIVATED` if `latte_activate` has never been called on t
 Returns `LATTE_ERR_LICENSE_EXPIRED` if the token's grace period has elapsed.
 
 A background renewal thread is triggered automatically when the token is old enough (≥ 60 min since issuance).
+
+### latte_deactivate
+
+```c
+typedef struct {
+    int     released;      /* 0 when it was already released; still success */
+    int64_t seat_free_at;  /* set when the seller's policy holds the seat until then, else 0 */
+
+    /* Filled on LATTE_ERR_DEACTIVATION_BLOCKED only */
+    char    reason[64];    /* "deactivation_cooldown" | "deactivation_limit_reached" */
+    char    message[512];  /* written to be shown to the user */
+    int64_t available_at;  /* when a release becomes possible, 0 when not known */
+} latte_deactivate_result;
+
+latte_status latte_deactivate(latte_sdk *sdk, latte_deactivate_result *out);
+```
+
+Releases this machine's seat so the licence can be activated on another machine: the "Deactivate" button in your app. It **needs the network**. The SDK asks the server to release the seat first and deletes the cached token only once the server has answered, so `latte_check` returns `LATTE_ERR_NOT_ACTIVATED` afterwards until the next `latte_activate`. If the call fails, nothing changes locally and the user can try again; the seat is never lost to a dropped connection. Repeating a release that already went through is success (`released` is 0). Times are Unix seconds; `out` may be `NULL`.
+
+The activation id and licence key come from the cached token, read without verifying it, so a machine whose token has expired can still release its seat; with no cached token the call returns `LATTE_ERR_NOT_ACTIVATED`. A machine that is lost, dead or wiped cannot call this: its seat is released from the seller's customer portal instead.
+
+On plans with the deactivation policy engine the seller may limit releases. A refusal returns `LATTE_ERR_DEACTIVATION_BLOCKED` with `reason`, `message` and `available_at` filled in. The seller may also hold the freed seat until this machine's last token has expired, which `seat_free_at` reports.
+
+```c
+latte_deactivate_result res;
+latte_status st = latte_deactivate(sdk, &res);
+if (st == LATTE_ERR_DEACTIVATION_BLOCKED)
+    show_message(res.message);
+else if (st != LATTE_OK)
+    show_message("Could not reach the licence server. Nothing was changed; try again when online.");
+else
+    show_message("This machine is released.");
+```
+
+### latte_machines / latte_rename_machine
+
+```c
+typedef struct {
+    char   *name;          /* NULL when the machine has none */
+    char   *fingerprint;   /* first 12 characters of the machine id hash */
+    int64_t activated_at;
+    int64_t last_seen_at;  /* last activation or renewal */
+    int64_t seat_free_at;  /* set on a released machine whose seat is still held, else 0 */
+    int     current;       /* 1 for this machine */
+} latte_machine;
+
+latte_status latte_machines(latte_sdk *sdk, latte_machine **out, size_t *count);
+void         latte_machines_free(latte_machine *machines, size_t count);
+
+#define LATTE_MACHINE_NAME_SIZE 257
+latte_status latte_rename_machine(latte_sdk *sdk, const char *name,
+                                  char *stored, size_t stored_size);
+```
+
+`latte_machines` lists the machines holding a seat on this machine's licence, for showing the customer where their licence is in use. It cannot release another machine; that is the customer portal's job. Free the array with `latte_machines_free()`.
+
+`latte_rename_machine` names this machine and writes the name as stored (trimmed) to `stored`, which may be `NULL`; a `LATTE_MACHINE_NAME_SIZE` buffer holds any name. The server refuses a name that is empty after trimming, longer than 64 characters or holds control characters. Both calls need the network and an active activation on this machine (`LATTE_ERR_LICENSE_EXPIRED` otherwise, from the server's `403`).
 
 ### latte_can / latte_limit / latte_has_entitlements
 
@@ -487,10 +558,11 @@ int main()
 
 | Class            | Wraps          | Notes                                                                 |
 | ----------------- | -------------- | ---------------------------------------------------------------------- |
-| `latte::Config`    | `latte_config` | Constructor takes `app_id`; `set_multi_instance(bool)` and `set_machine_id(std::string)` chain |
-| `latte::Sdk`       | `latte_sdk`    | Constructor throws `latte::Error`; `activate()` / `check()` return `License` |
+| `latte::Config`    | `latte_config` | Constructor takes `app_id`; `set_multi_instance(bool)`, `set_machine_id(std::string)` and `set_machine_name(std::string)` chain |
+| `latte::Sdk`       | `latte_sdk`    | Constructor throws `latte::Error`; `activate()` / `check()` return `License`; `deactivate()` returns `DeactivateResult`, `machines()` a `std::vector<latte::Machine>`, `rename_machine()` the stored name |
 | `latte::License`   | `latte_license`| Accessors (`key()`, `license_type()`, `metadata()`, …) instead of struct fields |
 | `latte::Error`     | `latte_status` | `std::runtime_error`; `.status()` returns the original `latte_status`  |
+| `latte::DeactivationBlocked` | `LATTE_ERR_DEACTIVATION_BLOCKED` | `latte::Error` thrown by `deactivate()`; `.reason()`, `.message()`, `.available_at()` |
 
 All three RAII classes are move-only (no copy constructor/assignment), matching the single-owner semantics of the underlying C handles. `include/latte/latte.h` remains usable directly from C++ (it's wrapped in `extern "C"`) if you don't want the wrapper.
 
@@ -524,9 +596,14 @@ typedef enum {
     /* Runtime */
     LATTE_ERR_NETWORK,
     LATTE_ERR_SERVER_INVALID_TOKEN,
-    LATTE_ERR_INTERNAL
+    LATTE_ERR_INTERNAL,
+
+    /* latte_deactivate */
+    LATTE_ERR_DEACTIVATION_BLOCKED
 } latte_status;
 ```
+
+`LATTE_ERR_DEACTIVATION_BLOCKED` is the seller's deactivation policy refusing a release (a cooldown, or the licence's releases for the year used up); the details are in the `latte_deactivate_result` passed to `latte_deactivate`. It is appended after `LATTE_ERR_INTERNAL`, so no existing value changes.
 
 ---
 
@@ -645,6 +722,8 @@ When `multi_instance` is set via `latte_config_set_multi_instance()`, the OS-wid
 
 The storage format is compatible with the `latte-go` SDK — tokens activated by one SDK can be read by the other.
 
+`latte_deactivate` empties this file once the server has released the seat, and leaves it untouched when the release fails.
+
 ---
 
 ## Background renewal
@@ -654,6 +733,8 @@ When `latte_activate` or `latte_check` returns a valid cached token, the SDK may
 Renewal happens after the token is older than 60 minutes (randomised jitter between 5 and 60 minutes at the SDK level). Renewal errors are silently ignored — the existing token remains valid until its grace period elapses.
 
 If the server returns an invalid-license response during renewal (e.g. the license was revoked), the stored token is wiped so the next `latte_check` returns `LATTE_ERR_NOT_ACTIVATED`.
+
+A renewal saves its token only while the cache still holds the activation it renewed, checked under the same lock `latte_deactivate` clears the cache with, so a renewal in flight during a release never writes a token back.
 
 `latte_free` waits for any in-flight renewal thread before returning, so there is no risk of use-after-free.
 
@@ -793,7 +874,7 @@ To verify cross-SDK parity, activate with `latte-go`'s `cmd/sdktest` then run `l
 include/latte/latte.h          Public C API
 include/latte/latte.hpp        Header-only C++ RAII wrapper (Config / Sdk / License / Error)
 src/
-  latte.c                      SDK: New / Activate / Check + renewal orchestration
+  latte.c                      SDK: New / Activate / Check / Deactivate / Machines + renewal orchestration
   appid.c                      AppID parsing, storage path resolution
   domain.{c,h}                 Internal license + cert_chain structs
   constants.h                  URLs, keys, timing constants
@@ -807,12 +888,12 @@ src/
     base64url.{c,h}            RFC 4648 §5 decoder
     jwt.{c,h}                  EdDSA JWT parse + verify
     cert.{c,h}                 verify_cert / pubkey_from_cert helpers
-  http/client.{c,h}            libcurl POST activate / renew
+  http/client.{c,h}            libcurl POST activate / renew / deactivate / machines / rename
   storage/
     file.{c,h}                 JSON token file (+ legacy timestamp:token)
     mem.{c,h}                  In-memory storage for unit tests
 vendor/cjson/                  Vendored cJSON (MIT)
-examples/simple.c              Minimal activate → check example (C API)
+examples/simple.c              Minimal activate → machines → deactivate example (C API)
 examples/simple.cpp            Same example, ported to the C++ wrapper
 tools/sdktest.c                Integration test: activate → check → poll
 tools/validator.c              Debug: activate → print JWT claims → renew
@@ -821,6 +902,7 @@ tests/
   test_storage.c               Storage round-trip + legacy format
   test_validate.c              Grace/expiry rule table tests
   test_jwt.c                   base64url + EdDSA JWT verify
+  test_machines.c              Deactivate / machines / rename against a local HTTP stub
 ```
 
 ---

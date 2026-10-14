@@ -1,6 +1,7 @@
 /*
  * C++ port of examples/simple.c using the latte::Config / latte::Sdk /
- * latte::License RAII wrapper from <latte/latte.hpp>.
+ * latte::License RAII wrapper from <latte/latte.hpp>: activate, list this
+ * licence's machines, and release this one.
  */
 #include <cstring>
 #include <iostream>
@@ -34,6 +35,35 @@ int main() {
       std::cout << "  InGracePeriod:" << lic.in_grace_period() << "\n";
     } catch (const latte::Error &e) {
       std::cerr << "Activation error: " << e.what() << "\n";
+      return 1;
+    }
+
+    try {
+      for (const latte::Machine &m : sdk.machines())
+        std::cout << "  " << m.fingerprint << " " << m.name.value_or("") << " (last seen "
+                  << m.last_seen_at << ")" << (m.current ? " <- this machine" : "") << "\n";
+    } catch (const latte::Error &e) {
+      std::cerr << "Machine list error: " << e.what() << "\n";
+      return 1;
+    }
+
+    std::cout << "Release this machine so the licence can move to another one? [y/N]\n> ";
+    std::string answer;
+    if (!std::getline(std::cin, answer) || answer != "y")
+      return 0;
+    try {
+      latte::DeactivateResult res = sdk.deactivate();
+      if (res.seat_free_at)
+        std::cout << "Released. The seat can be used on another machine from "
+                  << *res.seat_free_at << ".\n";
+      else
+        std::cout << "Released. Activate the licence on your other machine.\n";
+    } catch (const latte::DeactivationBlocked &e) {
+      std::cout << e.message() << "\n";
+      return 1;
+    } catch (const latte::Error &e) {
+      std::cerr << "Deactivation failed, nothing was changed; try again when online: " << e.what()
+                << "\n";
       return 1;
     }
   } catch (const latte::Error &e) {

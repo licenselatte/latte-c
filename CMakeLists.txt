@@ -231,6 +231,18 @@ target_include_directories(test_jwt PRIVATE include src ${LIBSODIUM_INCLUDE_DIRS
 target_link_libraries(test_jwt PRIVATE cjson ${LIBSODIUM_LIBRARIES})
 add_test(NAME jwt COMMAND test_jwt)
 
+# test_machines: deactivate / machines / rename against a local HTTP stub.
+# The test includes src/latte.c itself, so it builds from every other source.
+if(NOT WIN32)
+    set(TEST_MACHINES_SOURCES ${LATTE_SOURCES})
+    list(REMOVE_ITEM TEST_MACHINES_SOURCES src/latte.c)
+    add_executable(test_machines tests/test_machines.c ${TEST_MACHINES_SOURCES})
+    target_include_directories(test_machines PRIVATE include src vendor/cjson
+        ${LIBSODIUM_INCLUDE_DIRS} ${LIBCURL_INCLUDE_DIRS})
+    target_link_libraries(test_machines PRIVATE cjson ${LIBSODIUM_LIBRARIES} ${LIBCURL_LIBRARIES})
+    add_test(NAME machines COMMAND test_machines)
+endif()
+
 # ---------------------------------------------------------------------------
 # Install
 # ---------------------------------------------------------------------------

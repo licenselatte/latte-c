@@ -22,6 +22,15 @@ int ll_jwt_verify_ed25519(const char *token,
                            cJSON **claims_out);
 
 /*
+ * ll_jwt_decode_unverified:
+ *   Decode a JWT's payload without checking its signature, header or
+ *   issuer. Only for reading claims the server authenticates itself; never
+ *   for trusting them. Same ownership and return contract as
+ *   ll_jwt_verify_ed25519.
+ */
+int ll_jwt_decode_unverified(const char *token, cJSON **claims_out);
+
+/*
  * Convenience: get a string claim from the already-parsed claims object.
  * Returns NULL if the key is absent or not a string.
  */

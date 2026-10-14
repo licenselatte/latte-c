@@ -24,6 +24,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace latte {
 
@@ -37,6 +38,45 @@ public:
 
 private:
   latte_status status_;
+};
+
+/*
+ * Thrown by Sdk::deactivate() when the seller's deactivation policy refuses
+ * the release. Nothing was released and the cached token is kept.
+ */
+class DeactivationBlocked : public Error {
+public:
+  explicit DeactivationBlocked(const latte_deactivate_result &res)
+      : Error(LATTE_ERR_DEACTIVATION_BLOCKED), reason_(res.reason), message_(res.message),
+        available_at_(res.available_at ? std::optional<int64_t>(res.available_at) : std::nullopt) {}
+
+  /* "deactivation_cooldown" or "deactivation_limit_reached". */
+  const std::string &reason() const noexcept { return reason_; }
+  /* Explains the refusal; written to be shown to the user. */
+  const std::string &message() const noexcept { return message_; }
+  /* When a release becomes possible (Unix seconds), if known. */
+  std::optional<int64_t> available_at() const noexcept { return available_at_; }
+
+private:
+  std::string reason_;
+  std::string message_;
+  std::optional<int64_t> available_at_;
+};
+
+/* What Sdk::deactivate() reports. See latte_deactivate_result in latte.h. */
+struct DeactivateResult {
+  bool released;                       /* false when it was already released; still success */
+  std::optional<int64_t> seat_free_at; /* set when the seller holds the seat until then */
+};
+
+/* One machine holding a seat on the licence. See latte_machine in latte.h. */
+struct Machine {
+  std::optional<std::string> name;
+  std::string fingerprint;
+  int64_t activated_at;
+  int64_t last_seen_at;
+  std::optional<int64_t> seat_free_at;
+  bool current;
 };
 
 /* Owns a latte_license*; frees it on destruction. Move-only. */
@@ -155,6 +195,13 @@ public:
     return *this;
   }
 
+  /* See latte_config_set_machine_name() in latte.h. Empty sends no name;
+   * not calling it sends the hostname. Chainable. */
+  Config &set_machine_name(const std::string &name) {
+    latte_config_set_machine_name(cfg_, name.c_str());
+    return *this;
+  }
+
   const latte_config *raw() const noexcept { return cfg_; }
 
 private:
@@ -211,6 +258,48 @@ public:
     if (st != LATTE_OK)
       throw Error(st);
     return License(lic);
+  }
+
+  /* See latte_deactivate() in latte.h. Throws DeactivationBlocked when the
+   * seller's policy refuses, latte::Error on any other failure. */
+  DeactivateResult deactivate() {
+    latte_deactivate_result res;
+    latte_status st = latte_deactivate(sdk_, &res);
+    if (st == LATTE_ERR_DEACTIVATION_BLOCKED)
+      throw DeactivationBlocked(res);
+    if (st != LATTE_OK)
+      throw Error(st);
+    return {res.released != 0,
+            res.seat_free_at ? std::optional<int64_t>(res.seat_free_at) : std::nullopt};
+  }
+
+  /* See latte_machines() in latte.h. Throws latte::Error on failure. */
+  std::vector<Machine> machines() {
+    latte_machine *ms = nullptr;
+    size_t count = 0;
+    latte_status st = latte_machines(sdk_, &ms, &count);
+    if (st != LATTE_OK)
+      throw Error(st);
+    std::vector<Machine> out;
+    for (size_t i = 0; i < count; ++i) {
+      const latte_machine &m = ms[i];
+      out.push_back({m.name ? std::optional<std::string>(m.name) : std::nullopt,
+                     m.fingerprint ? m.fingerprint : "", m.activated_at, m.last_seen_at,
+                     m.seat_free_at ? std::optional<int64_t>(m.seat_free_at) : std::nullopt,
+                     m.current != 0});
+    }
+    latte_machines_free(ms, count);
+    return out;
+  }
+
+  /* See latte_rename_machine() in latte.h. Returns the name as stored.
+   * Throws latte::Error on failure. */
+  std::string rename_machine(const std::string &name) {
+    char stored[LATTE_MACHINE_NAME_SIZE];
+    latte_status st = latte_rename_machine(sdk_, name.c_str(), stored, sizeof(stored));
+    if (st != LATTE_OK)
+      throw Error(st);
+    return stored;
   }
 
 private:

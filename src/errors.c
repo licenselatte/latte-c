@@ -8,6 +8,7 @@ latte_status map_network_error(ll_port_error e)
     case LL_PORT_ERR_INVALID_PROJECT_KEY:         return LATTE_ERR_INVALID_PROJECT_KEY;
     case LL_PORT_ERR_LICENSE_NOT_FOUND:           return LATTE_ERR_LICENSE_NOT_FOUND;
     case LL_PORT_ERR_NETWORK:                     return LATTE_ERR_NETWORK;
+    case LL_PORT_ERR_DEACTIVATION_BLOCKED:        return LATTE_ERR_DEACTIVATION_BLOCKED;
     default:                                       return LATTE_ERR_INTERNAL;
     }
 }
@@ -31,6 +32,7 @@ const char *latte_strerror(latte_status s)
     case LATTE_ERR_MACHINE_ID_FAILED:       return "licenselatte: cannot determine machine ID";
     case LATTE_ERR_NETWORK:                 return "licenselatte: network error";
     case LATTE_ERR_SERVER_INVALID_TOKEN:    return "licenselatte: server returned invalid token";
+    case LATTE_ERR_DEACTIVATION_BLOCKED:    return "licenselatte: deactivation blocked";
     default:                                return "licenselatte: internal error";
     }
 }

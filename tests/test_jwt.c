@@ -171,6 +171,19 @@ int main(void)
         free(bj);
     }
 
+    /* Unverified decode reads the payload of a token that fails verification */
+    {
+        char *bj = make_jwt(sk, payload, 1);
+        cJSON *uc = NULL;
+        r = ll_jwt_decode_unverified(bj, &uc);
+        CHECK(r == 0 && strcmp(ll_jwt_string_claim(uc, "sub"), "TESTKEY123") == 0,
+              "unverified decode reads a badly signed token's claims");
+        cJSON_Delete(uc);
+        free(bj);
+        CHECK(ll_jwt_decode_unverified("garbage", &uc) != 0 && uc == NULL,
+              "unverified decode rejects a non-JWT");
+    }
+
     printf("\n%d passed, %d failed\n", pass, fail);
     return fail > 0 ? 1 : 0;
 }

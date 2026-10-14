@@ -25,6 +25,7 @@ typedef enum {
      */
     LL_PORT_ERR_MACHINE_ID_MISMATCH,
     LL_PORT_ERR_INVALID_LICENSE,  /* generic invalid: wipe stored token */
+    LL_PORT_ERR_DEACTIVATION_BLOCKED,
 } ll_port_error;
 
 latte_status map_network_error(ll_port_error e);

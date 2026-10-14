@@ -34,7 +34,11 @@ typedef enum {
   /* Runtime errors */
   LATTE_ERR_NETWORK,
   LATTE_ERR_SERVER_INVALID_TOKEN,
-  LATTE_ERR_INTERNAL
+  LATTE_ERR_INTERNAL,
+
+  /* latte_deactivate: the seller's deactivation policy refused the release.
+   * The reason, message and available_at are in latte_deactivate_result. */
+  LATTE_ERR_DEACTIVATION_BLOCKED
 } latte_status;
 
 /* Key-value pair for license metadata (from the pmd JWT claim). */
@@ -197,6 +201,22 @@ latte_config *latte_config_set_multi_instance(latte_config *cfg, int multi_insta
  */
 latte_config *latte_config_set_machine_id(latte_config *cfg, const char *raw_machine_id);
 
+/*
+ * latte_config_set_machine_name - the name this machine is given when it
+ * activates, shown to the customer by latte_machines() and the customer
+ * portal, and to you in the dashboard.
+ *
+ * By default (or after passing NULL) the SDK sends the OS hostname, or no
+ * name when the hostname cannot be read. "" sends no name at all. The
+ * server stores the name only when the activation is created and drops an
+ * invalid one; a name set later with latte_rename_machine() is kept on
+ * re-activation. Copied internally.
+ *
+ * Returns cfg, for chaining. No-op if cfg is NULL. If the copy cannot be
+ * allocated, latte_new() returns LATTE_ERR_INTERNAL.
+ */
+latte_config *latte_config_set_machine_name(latte_config *cfg, const char *name);
+
 /* Release a config built with latte_config_new(). */
 void latte_config_free(latte_config *cfg);
 
@@ -283,6 +303,89 @@ int latte_limit(const latte_license *lic, const char *key, int64_t *out);
  * to renew. See the latte_entitlement comment above.
  */
 int latte_has_entitlements(const latte_license *lic);
+
+/*
+ * What latte_deactivate reports. Times are Unix seconds (UTC), 0 when absent.
+ */
+typedef struct {
+  /* 0 when this machine was already released, on an earlier call or by the
+   * seller. Both outcomes are success. */
+  int     released;
+  /* When the freed seat can be used by another machine: set when the
+   * seller's policy holds it until this machine's last token has expired,
+   * 0 when it is free now. */
+  int64_t seat_free_at;
+
+  /* Filled on LATTE_ERR_DEACTIVATION_BLOCKED only. reason is
+   * "deactivation_cooldown" or "deactivation_limit_reached"; message is
+   * written to be shown to the user; available_at is when a release becomes
+   * possible, 0 when not known. */
+  char    reason[64];
+  char    message[512];
+  int64_t available_at;
+} latte_deactivate_result;
+
+/*
+ * latte_deactivate: release this machine's seat so the licence can be
+ * activated on another machine.
+ *
+ * Needs the network. The server releases the seat first, and only once it
+ * has answered does the SDK delete the cached token, after which
+ * latte_check returns LATTE_ERR_NOT_ACTIVATED until the next latte_activate.
+ * On any error the cached token is kept and the call can be retried. A
+ * machine that is lost or dead cannot call this; its seat is released from
+ * the seller's customer portal.
+ *
+ * The activation id and licence key come from the cached token, read
+ * without verifying it, so an expired token can still release its seat.
+ * Returns LATTE_ERR_NOT_ACTIVATED when there is no cached token, and
+ * LATTE_ERR_DEACTIVATION_BLOCKED when the seller's policy refuses the
+ * release. out may be NULL.
+ */
+latte_status latte_deactivate(latte_sdk *sdk, latte_deactivate_result *out);
+
+/*
+ * One machine holding a seat on the licence, as latte_machines lists it.
+ * It identifies a machine for a person to recognise and is never a handle
+ * for acting on one. Times are Unix seconds (UTC).
+ */
+typedef struct {
+  char   *name;          /* NULL when the machine has none */
+  char   *fingerprint;   /* first 12 characters of the machine id hash */
+  int64_t activated_at;
+  int64_t last_seen_at;  /* the machine's last activation or renewal */
+  int64_t seat_free_at;  /* set on a released machine whose seat is still held, else 0 */
+  int     current;       /* 1 for the machine the SDK is running on */
+} latte_machine;
+
+/*
+ * latte_machines: list the machines holding a seat on this machine's
+ * licence. Needs the network and an active activation on this machine
+ * (LATTE_ERR_LICENSE_EXPIRED otherwise, from the server's 403).
+ *
+ * On LATTE_OK, out receives an array of count machines, NULL when count is
+ * 0; free it with latte_machines_free().
+ */
+latte_status latte_machines(latte_sdk *sdk, latte_machine **out, size_t *count);
+
+/* Release an array returned by latte_machines. */
+void latte_machines_free(latte_machine *machines, size_t count);
+
+/* Buffer size that holds any stored machine name: 64 characters of up to
+ * four UTF-8 bytes each, plus the terminator. */
+#define LATTE_MACHINE_NAME_SIZE 257
+
+/*
+ * latte_rename_machine: name this machine. Needs the network and an active
+ * activation on this machine.
+ *
+ * The server trims the name and refuses one that is then empty, longer than
+ * 64 characters or holds control characters. On LATTE_OK the name as
+ * stored is written to stored (stored_size bytes, LATTE_MACHINE_NAME_SIZE
+ * holds any name); stored may be NULL.
+ */
+latte_status latte_rename_machine(latte_sdk *sdk, const char *name,
+                                  char *stored, size_t stored_size);
 
 /* Release a latte_license returned by latte_activate or latte_check. */
 void latte_license_free(latte_license *lic);

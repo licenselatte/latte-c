@@ -1,6 +1,7 @@
 /*
  * Simple example: port of example/simple/main.go.
- * Demonstrates the activate → check pattern.
+ * Demonstrates activate, then listing this licence's machines and releasing
+ * this one so the licence can move to another machine.
  */
 #include <stdio.h>
 #include <string.h>
@@ -37,16 +38,50 @@ int main(void)
     st = latte_activate(sdk, input, &lic);
     if (st != LATTE_OK) {
         fprintf(stderr, "Activation error: %s\n", latte_strerror(st));
-    } else {
-        printf("License activated!\n");
-        printf("  Key:          %s\n", lic->key         ? lic->key         : "");
-        printf("  ActivationID: %s\n", lic->activation_id? lic->activation_id: "");
-        printf("  LicenseType:  %s\n", lic->license_type ? lic->license_type : "");
-        printf("  IssuedAt:     %lld\n", (long long)lic->issued_at);
-        printf("  ExpiresAt:    %lld\n", (long long)lic->expires_at);
-        printf("  InGracePeriod:%d\n",   lic->in_grace_period);
-        latte_license_free(lic);
+        latte_free(sdk);
+        return 1;
     }
+    printf("License activated!\n");
+    printf("  Key:          %s\n", lic->key         ? lic->key         : "");
+    printf("  ActivationID: %s\n", lic->activation_id? lic->activation_id: "");
+    printf("  LicenseType:  %s\n", lic->license_type ? lic->license_type : "");
+    printf("  IssuedAt:     %lld\n", (long long)lic->issued_at);
+    printf("  ExpiresAt:    %lld\n", (long long)lic->expires_at);
+    printf("  InGracePeriod:%d\n",   lic->in_grace_period);
+    latte_license_free(lic);
+
+    latte_machine *machines = NULL;
+    size_t count = 0;
+    st = latte_machines(sdk, &machines, &count);
+    if (st != LATTE_OK) {
+        fprintf(stderr, "Machine list error: %s\n", latte_strerror(st));
+        latte_free(sdk);
+        return 1;
+    }
+    for (size_t i = 0; i < count; i++)
+        printf("  %s %s (last seen %lld)%s\n", machines[i].fingerprint,
+               machines[i].name ? machines[i].name : "",
+               (long long)machines[i].last_seen_at,
+               machines[i].current ? " <- this machine" : "");
+    latte_machines_free(machines, count);
+
+    printf("Release this machine so the licence can move to another one? [y/N]\n> ");
+    if (!fgets(input, sizeof(input), stdin) || input[0] != 'y') {
+        latte_free(sdk);
+        return 0;
+    }
+    latte_deactivate_result res;
+    st = latte_deactivate(sdk, &res);
+    if (st == LATTE_ERR_DEACTIVATION_BLOCKED)
+        printf("%s\n", res.message);
+    else if (st != LATTE_OK)
+        fprintf(stderr, "Deactivation failed, nothing was changed; try again when online: %s\n",
+                latte_strerror(st));
+    else if (res.seat_free_at)
+        printf("Released. The seat can be used on another machine from %lld.\n",
+               (long long)res.seat_free_at);
+    else
+        printf("Released. Activate the licence on your other machine.\n");
 
     latte_free(sdk);
     return st == LATTE_OK ? 0 : 1;

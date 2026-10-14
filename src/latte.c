@@ -7,6 +7,7 @@
 #include "validate.h"
 #include "machineid.h"
 #include "crypto/key.h"
+#include "crypto/jwt.h"
 #include "storage/file.h"
 #include "http/client.h"
 #include "thread.h"
@@ -15,6 +16,9 @@
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
+#if !defined(_WIN32)
+#  include <unistd.h>
+#endif
 
 /* -------------------------------------------------------------------------
  * SDK handle
@@ -109,6 +113,42 @@ static latte_license *domain_to_public(const ll_license *d)
 }
 
 
+/*
+ * Reads the activation id (aid) and licence key (sub) out of the cached
+ * token into aid[256] and key[64]. The token is not verified: the server
+ * authenticates the calls these credentials go to, and a machine whose token
+ * has outlived its grace window or its certificate chain still holds a seat
+ * it must be able to release. Returns 0, or -1 when there is no usable
+ * cached token.
+ */
+static int cached_credentials(const latte_sdk *sdk, char aid[256], char key[64])
+{
+    char *raw_token = NULL;
+    ll_cert_chain *chain = NULL;
+    if (ll_file_load_token(sdk->store_path, &raw_token, &chain) < 0) return -1;
+    ll_cert_chain_free(chain);
+
+    cJSON *claims = NULL;
+    int rc = ll_jwt_decode_unverified(raw_token, &claims);
+    free(raw_token);
+    if (rc < 0) return -1;
+
+    const char *a = ll_jwt_string_claim(claims, "aid");
+    const char *k = ll_jwt_string_claim(claims, "sub");
+    rc = a && a[0] && k && k[0] &&
+         (size_t)snprintf(aid, 256, "%s", a) < 256 &&
+         (size_t)snprintf(key, 64, "%s", k) < 64 ? 0 : -1;
+    cJSON_Delete(claims);
+    return rc;
+}
+
+/* Whether the cached token belongs to activation_id. */
+static int holds_activation(const latte_sdk *sdk, const char *activation_id)
+{
+    char aid[256], key[64];
+    return cached_credentials(sdk, aid, key) == 0 && strcmp(aid, activation_id) == 0;
+}
+
 static int should_try_renew(latte_sdk *sdk, const ll_license *lic)
 {
     ll_mutex_lock(&sdk->renew_mu);
@@ -155,14 +195,18 @@ static void *renew_thread_fn(void *arg)
                                      sdk->machine_id,
                                      &token,
                                      &chain);
-    free(ra);
 
     if (pe != LL_PORT_OK) {
-        /* If the server says the license is invalid, wipe the cache. */
+        /* If the server says the license is invalid, wipe the cache, but
+         * only while it still holds the activation this renewed: after a
+         * latte_deactivate and a fresh activation it holds a new one. */
         if (pe == LL_PORT_ERR_LICENSE_INACTIVE_OR_EXPIRED ||
             pe == LL_PORT_ERR_LICENSE_NOT_FOUND           ||
             pe == LL_PORT_ERR_INVALID_LICENSE) {
-            ll_file_save_token(sdk->store_path, "", NULL);
+            ll_mutex_lock(&sdk->renew_mu);
+            if (holds_activation(sdk, ra->activation_id))
+                ll_file_save_token(sdk->store_path, "", NULL);
+            ll_mutex_unlock(&sdk->renew_mu);
         }
         goto done;
     }
@@ -180,13 +224,21 @@ static void *renew_thread_fn(void *arg)
             goto done;
         }
         ll_license_free(lic2);
-        ll_file_save_token(sdk->store_path, token, chain);
+
+        /* latte_deactivate clears the cache under renew_mu, so a renewal
+         * that finishes afterwards finds a different activation, or none,
+         * and leaves the cache alone. */
+        ll_mutex_lock(&sdk->renew_mu);
+        if (holds_activation(sdk, ra->activation_id))
+            ll_file_save_token(sdk->store_path, token, chain);
+        ll_mutex_unlock(&sdk->renew_mu);
     }
 
     free(token);
     ll_cert_chain_free(chain);
 
 done:
+    free(ra);
     ll_mutex_lock(&sdk->renew_mu);
     sdk->renew_in_flight = 0;
     ll_mutex_unlock(&sdk->renew_mu);
@@ -234,6 +286,8 @@ struct latte_config {
     int   multi_instance;
     char *machine_id;        /* raw override; NULL means read the OS ID */
     int   machine_id_failed; /* the override could not be copied */
+    char *machine_name;      /* NULL means the hostname; "" sends none */
+    int   machine_name_failed;
 };
 
 latte_config *latte_config_new(const char *app_id)
@@ -265,11 +319,25 @@ latte_config *latte_config_set_machine_id(latte_config *cfg, const char *raw_mac
     return cfg;
 }
 
+latte_config *latte_config_set_machine_name(latte_config *cfg, const char *name)
+{
+    if (!cfg) return cfg;
+    free(cfg->machine_name);
+    cfg->machine_name = NULL;
+    cfg->machine_name_failed = 0;
+    if (name) {
+        cfg->machine_name = strdup_safe(name);
+        if (!cfg->machine_name) cfg->machine_name_failed = 1;
+    }
+    return cfg;
+}
+
 void latte_config_free(latte_config *cfg)
 {
     if (!cfg) return;
     free(cfg->app_id);
     free(cfg->machine_id);
+    free(cfg->machine_name);
     free(cfg);
 }
 
@@ -281,7 +349,7 @@ latte_status latte_new(const latte_config *config, latte_sdk **out)
 {
     *out = NULL;
     if (!config || !config->app_id) return LATTE_ERR_INVALID_CONFIG;
-    if (config->machine_id_failed) return LATTE_ERR_INTERNAL;
+    if (config->machine_id_failed || config->machine_name_failed) return LATTE_ERR_INTERNAL;
     const char *app_id = config->app_id;
 
     if (sodium_init() < 0) return LATTE_ERR_INTERNAL;
@@ -330,7 +398,20 @@ latte_status latte_new(const latte_config *config, latte_sdk **out)
         free(sdk); return LATTE_ERR_MACHINE_ID_FAILED;
     }
 
-    sdk->http = ll_http_client_new(base_url, app_id);
+    /* The name is a courtesy, so a hostname the OS will not give is no name. */
+    char hostname[256] = "";
+    const char *machine_name = config->machine_name;
+    if (!machine_name) {
+#if defined(_WIN32)
+        DWORD n = sizeof(hostname);
+        if (!GetComputerNameA(hostname, &n)) hostname[0] = '\0';
+#else
+        if (gethostname(hostname, sizeof(hostname) - 1) != 0) hostname[0] = '\0';
+#endif
+        machine_name = hostname;
+    }
+
+    sdk->http = ll_http_client_new(base_url, app_id, machine_name);
     if (!sdk->http) { free(sdk); return LATTE_ERR_INTERNAL; }
 
     ll_mutex_init(&sdk->renew_mu);
@@ -453,6 +534,66 @@ latte_status latte_check(latte_sdk *sdk, latte_license **out)
     if (!pub) return LATTE_ERR_INTERNAL;
     *out = pub;
     return LATTE_OK;
+}
+
+latte_status latte_deactivate(latte_sdk *sdk, latte_deactivate_result *out)
+{
+    latte_deactivate_result discard;
+    if (!out) out = &discard;
+    memset(out, 0, sizeof(*out));
+    if (!sdk) return LATTE_ERR_INTERNAL;
+
+    char aid[256], key[64];
+    if (cached_credentials(sdk, aid, key) < 0) return LATTE_ERR_NOT_ACTIVATED;
+
+    /* The server first: the cache is cleared only once the seat is released,
+     * so any failure leaves this machine as it was and the call retryable. */
+    ll_port_error pe = ll_http_deactivate(sdk->http, aid, key, sdk->machine_id, out);
+    if (pe != LL_PORT_OK) return map_network_error(pe);
+
+    /* Under renew_mu: an in-flight renewal saves only while the cache still
+     * holds its activation, so it cannot write a token back after this. */
+    ll_mutex_lock(&sdk->renew_mu);
+    ll_file_save_token(sdk->store_path, "", NULL);
+    ll_mutex_unlock(&sdk->renew_mu);
+    return LATTE_OK;
+}
+
+latte_status latte_machines(latte_sdk *sdk, latte_machine **out, size_t *count)
+{
+    if (!sdk || !out || !count) return LATTE_ERR_INTERNAL;
+    *out = NULL;
+    *count = 0;
+
+    char aid[256], key[64];
+    if (cached_credentials(sdk, aid, key) < 0) return LATTE_ERR_NOT_ACTIVATED;
+
+    ll_port_error pe = ll_http_machines(sdk->http, aid, key, sdk->machine_id, out, count);
+    return pe == LL_PORT_OK ? LATTE_OK : map_network_error(pe);
+}
+
+void latte_machines_free(latte_machine *machines, size_t count)
+{
+    if (!machines) return;
+    for (size_t i = 0; i < count; i++) {
+        free(machines[i].name);
+        free(machines[i].fingerprint);
+    }
+    free(machines);
+}
+
+latte_status latte_rename_machine(latte_sdk *sdk, const char *name,
+                                  char *stored, size_t stored_size)
+{
+    if (stored && stored_size) stored[0] = '\0';
+    if (!sdk || !name) return LATTE_ERR_INTERNAL;
+
+    char aid[256], key[64];
+    if (cached_credentials(sdk, aid, key) < 0) return LATTE_ERR_NOT_ACTIVATED;
+
+    ll_port_error pe = ll_http_rename_machine(sdk->http, aid, key, sdk->machine_id,
+                                              name, stored, stored_size);
+    return pe == LL_PORT_OK ? LATTE_OK : map_network_error(pe);
 }
 
 void latte_license_free(latte_license *lic)

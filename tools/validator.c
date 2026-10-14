@@ -53,7 +53,7 @@ int main(int argc, char **argv)
     }
 
     /* Use the local API endpoint directly */
-    ll_http_client *client = ll_http_client_new(LATTE_URL_LOCAL, app_id);
+    ll_http_client *client = ll_http_client_new(LATTE_URL_LOCAL, app_id, NULL);
     if (!client) { fprintf(stderr, "OOM\n"); return 1; }
 
     char sanitized[64];

@@ -90,6 +90,25 @@ int ll_jwt_verify_ed25519(const char *token,
     return 0;
 }
 
+int ll_jwt_decode_unverified(const char *token, cJSON **claims_out)
+{
+    *claims_out = NULL;
+    const char *h_start, *p_start, *s_start;
+    size_t h_len, p_len, s_len;
+    if (split_jwt(token, &h_start, &h_len, &p_start, &p_len, &s_start, &s_len) < 0)
+        return -1;
+
+    unsigned char *pay_bytes = NULL;
+    size_t pay_len = 0;
+    if (ll_base64url_decode(p_start, p_len, &pay_bytes, &pay_len) < 0) return -1;
+    cJSON *claims = cJSON_ParseWithLength((const char *)pay_bytes, pay_len);
+    free(pay_bytes);
+    if (!claims || !cJSON_IsObject(claims)) { cJSON_Delete(claims); return -1; }
+
+    *claims_out = claims;
+    return 0;
+}
+
 const char *ll_jwt_string_claim(const cJSON *claims, const char *key)
 {
     if (!claims) return NULL;

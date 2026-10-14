@@ -1,6 +1,7 @@
 /*
  * Request bodies for /v1/activate and /v1/renew carry the SDK's language and
- * version alongside the fields the API acts on.
+ * version alongside the fields the API acts on, and activate carries the
+ * machine name when there is one.
  */
 #include <stdio.h>
 #include <string.h>
@@ -43,7 +44,7 @@ int main(void)
 {
     printf("=== test_http_body (version %s) ===\n", LATTE_VERSION);
 
-    char *activate = ll_http_activate_body("pk_test_x", "KEY-1", "machine");
+    char *activate = ll_http_activate_body("pk_test_x", "KEY-1", "machine", NULL);
     check_sdk(activate, "activate");
     {
         cJSON *root = cJSON_Parse(activate);
@@ -51,6 +52,26 @@ int main(void)
               str_is(root, "license_key", "KEY-1") &&
               str_is(root, "machine_id", "machine"),
               "activate body keeps project_key, license_key, machine_id");
+        CHECK(root && !cJSON_HasObjectItem(root, "machine_name"),
+              "activate body omits machine_name when there is none");
+        cJSON_Delete(root);
+    }
+    free(activate);
+
+    activate = ll_http_activate_body("pk_test_x", "KEY-1", "machine", "Studio Mac");
+    {
+        cJSON *root = cJSON_Parse(activate);
+        CHECK(root && str_is(root, "machine_name", "Studio Mac"),
+              "activate body carries a configured machine_name");
+        cJSON_Delete(root);
+    }
+    free(activate);
+
+    activate = ll_http_activate_body("pk_test_x", "KEY-1", "machine", "");
+    {
+        cJSON *root = cJSON_Parse(activate);
+        CHECK(root && !cJSON_HasObjectItem(root, "machine_name"),
+              "activate body omits an empty machine_name");
         cJSON_Delete(root);
     }
     free(activate);
