@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(latte-c VERSION 1.5.0 LANGUAGES C CXX)
+project(latte-c VERSION 1.5.1 LANGUAGES C CXX)
 
 # The version the SDK reports to the API in every request body.
 add_compile_definitions(LATTE_VERSION="${PROJECT_VERSION}")
@@ -36,6 +36,9 @@ pkg_check_modules(LIBCURL   REQUIRED libcurl)
 add_library(cjson STATIC vendor/cjson/cJSON.c)
 target_include_directories(cjson PUBLIC vendor/cjson)
 target_compile_options(cjson PRIVATE -w)   # suppress cJSON warnings
+# cJSON otherwise marks its functions __declspec(dllexport) on Windows, which
+# turns off MinGW's auto-export and leaves liblatte.dll without latte_*.
+target_compile_definitions(cjson PUBLIC CJSON_HIDE_SYMBOLS)
 
 # ---------------------------------------------------------------------------
 # Library sources
@@ -90,6 +93,11 @@ target_compile_options(latte_shared PRIVATE
     ${LIBSODIUM_CFLAGS_OTHER} ${LIBCURL_CFLAGS_OTHER}
     -Wall -Wextra -Wpedantic
 )
+# Keep the vendored cJSON out of the DLL's exports so it cannot clash with an
+# application's own cJSON.
+if(MINGW)
+    target_link_options(latte_shared PRIVATE -Wl,--exclude-libs,ALL)
+endif()
 
 # Convenience alias
 add_library(latte::latte ALIAS latte_static)
