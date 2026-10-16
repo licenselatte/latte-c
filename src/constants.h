@@ -28,7 +28,7 @@
 
 /* API base URLs per environment */
 #define LATTE_URL_LIVE  "https://api.licenselatte.com"
-#define LATTE_URL_TEST  "https://test.api.licenselatte.com"
+#define LATTE_URL_TEST  "https://api.licenselatte.com"
 #define LATTE_URL_LOCAL "http://localhost:8080"
 
 /* JWT issuer claim value */
