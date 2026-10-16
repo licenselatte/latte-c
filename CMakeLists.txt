@@ -171,6 +171,7 @@ add_test(NAME entitlements COMMAND test_entitlements)
 # paths resolve without copying them into the build tree.
 add_executable(test_fixtures
     tests/test_fixtures.c
+    src/storage/file.c
     src/verify.c
     src/validate.c
     src/domain.c
