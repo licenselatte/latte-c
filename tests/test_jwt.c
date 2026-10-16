@@ -182,6 +182,10 @@ int main(void)
         free(bj);
         CHECK(ll_jwt_decode_unverified("garbage", &uc) != 0 && uc == NULL,
               "unverified decode rejects a non-JWT");
+        CHECK(ll_jwt_verify_ed25519(NULL, pk, sizeof(pk), &uc) != 0 && uc == NULL,
+              "verify rejects a missing token");
+        CHECK(ll_jwt_decode_unverified(NULL, &uc) != 0 && uc == NULL,
+              "unverified decode rejects a missing token");
     }
 
     printf("\n%d passed, %d failed\n", pass, fail);
