@@ -541,13 +541,19 @@ latte_status latte_check(latte_sdk *sdk, latte_license **out)
     }
     free(raw_token); ll_cert_chain_free(chain);
 
+    /* A verified token for this machine that has outlived its grace window
+     * or its licence end is still renewed: the server decides, and a machine
+     * that was off for longer than the window recovers without activating
+     * again. check itself reports the error until the renewal has saved a
+     * new token. */
     ll_port_error vr = ll_validate(lic, sdk->machine_id);
+    if (vr == LL_PORT_OK || vr == LL_PORT_ERR_GRACE_PERIOD_EXPIRED ||
+        vr == LL_PORT_ERR_LICENSE_INACTIVE_OR_EXPIRED || vr == LL_PORT_ERR_LICENSE_TOO_OLD)
+        maybe_start_renew(sdk, lic);
     if (vr != LL_PORT_OK) {
         ll_license_free(lic);
         return LATTE_ERR_NOT_ACTIVATED;
     }
-
-    maybe_start_renew(sdk, lic);
 
     if (!ll_license_is_valid(lic)) {
         ll_license_free(lic);
