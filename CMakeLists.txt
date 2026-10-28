@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(latte-c VERSION 1.5.2 LANGUAGES C CXX)
+project(latte-c VERSION 1.6.0 LANGUAGES C CXX)
 
 # The version the SDK reports to the API in every request body.
 add_compile_definitions(LATTE_VERSION="${PROJECT_VERSION}")
