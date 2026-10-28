@@ -397,7 +397,7 @@ Validates the locally-stored token **without a network call**. Use this on every
 Returns `LATTE_ERR_NOT_ACTIVATED` if `latte_activate` has never been called on this machine.  
 Returns `LATTE_ERR_LICENSE_EXPIRED` if the token's grace period has elapsed.
 
-A background renewal thread is triggered automatically when the token is old enough (≥ 60 min since issuance).
+A background renewal thread is triggered automatically when the token is old enough (≥ 60 min since issuance). That includes a token that is past its grace window.
 
 ### latte_deactivate
 
@@ -687,7 +687,11 @@ issued_at ───────────────────────�
 Two cases result in expiry:
 
 1. **Licence ended**: `now > expires_at`. `latte_check` returns `LATTE_ERR_LICENSE_EXPIRED`, whatever the offline window says.
-2. **Offline too long**: `now > issued_at + grace_period`. The device has been offline longer than the window. The user must reconnect to receive a fresh token.
+2. **Offline too long**: `now > issued_at + grace_period`. The device has been offline longer than the window. The device must reconnect to receive a fresh token; see [Recovering after a long offline spell](#recovering-after-a-long-offline-spell).
+
+### Recovering after a long offline spell
+
+A computer that was off longer than the grace window recovers by itself. The first `latte_check` after launch returns `LATTE_ERR_NOT_ACTIVATED` and starts a background renewal, as long as the cached token's signature chain verifies and it was issued for this machine. When the machine is online the renewal saves a fresh token, and a `latte_check` a few seconds later returns the licence. Hosts should re-check rather than send the user to activate again. If the server rejects the renewal as invalid or inactive the cache is cleared, and if it cannot be reached the cached token is kept and the next attempt comes after the 5-minute window. `in_grace_period` stays `0` for such a token, because `latte_check` returns an error for it.
 
 ### Token formats
 
@@ -748,7 +752,7 @@ The storage format is compatible with the `latte-go` SDK — tokens activated by
 
 When `latte_activate` or `latte_check` returns a valid cached token, the SDK may fire a background `pthread` that calls `POST /v1/renew` and overwrites the stored token with the fresh one.
 
-Renewal is attempted once the token is at least 60 minutes old, and retried no more than every 5 minutes. Renewal errors are silently ignored — the existing token remains valid until its grace period elapses. A renewal that could not reach the server sets `in_grace_period`; see [`in_grace_period`](#in_grace_period).
+Renewal is attempted once the token is at least 60 minutes old, and retried no more than every 5 minutes. A token past its grace window is renewed too; see [Recovering after a long offline spell](#recovering-after-a-long-offline-spell). Renewal errors are silently ignored — the existing token remains valid until its grace period elapses. A renewal that could not reach the server sets `in_grace_period`; see [`in_grace_period`](#in_grace_period).
 
 If the server returns an invalid-license response during renewal (e.g. the license was revoked), the stored token is wiped so the next `latte_check` returns `LATTE_ERR_NOT_ACTIVATED`. Deactivating a licence in the dashboard therefore takes effect at the next renewal attempt.
 

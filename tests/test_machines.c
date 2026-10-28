@@ -122,6 +122,210 @@ static int token_kept(void)
     return kept;
 }
 
+typedef struct { unsigned char pk[32], sk[64]; } keypair;
+
+static char *b64url(const unsigned char *in, size_t len)
+{
+    size_t cap = sodium_base64_ENCODED_LEN(len, sodium_base64_VARIANT_URLSAFE_NO_PADDING);
+    char *out = (char *)malloc(cap);
+    sodium_bin2base64(out, cap, in, len, sodium_base64_VARIANT_URLSAFE_NO_PADDING);
+    return out;
+}
+
+static char *make_jwt(const unsigned char *sk, const char *payload)
+{
+    const char *header = "{\"alg\":\"EdDSA\",\"typ\":\"JWT\"}";
+    char *h = b64url((const unsigned char *)header, strlen(header));
+    char *p = b64url((const unsigned char *)payload, strlen(payload));
+    char msg[2048];
+    snprintf(msg, sizeof(msg), "%s.%s", h, p);
+    unsigned char sig[crypto_sign_ed25519_BYTES];
+    crypto_sign_ed25519_detached(sig, NULL, (const unsigned char *)msg, strlen(msg), sk);
+    char *s = b64url(sig, sizeof(sig));
+    char *jwt = (char *)malloc(strlen(msg) + strlen(s) + 2);
+    sprintf(jwt, "%s.%s", msg, s);
+    free(h); free(p); free(s);
+    return jwt;
+}
+
+/* Signs a cert JWT for the key pub with parent_sk. */
+static char *make_cert(const unsigned char *parent_sk, const char *sub, const char *field,
+                       const unsigned char *pub, int64_t iat, int64_t exp)
+{
+    char hex[65], payload[512];
+    sodium_bin2hex(hex, sizeof(hex), pub, 32);
+    snprintf(payload, sizeof(payload),
+             "{\"iss\":\"licenselatte\",\"sub\":\"%s\",\"pid\":\"proj\",\"%s\":\"%s\","
+             "\"iat\":%lld,\"exp\":%lld}",
+             sub, field, hex, (long long)iat, (long long)exp);
+    return make_jwt(parent_sk, payload);
+}
+
+/* A token for act-1/KEY1 issued at iat with the given grace window, carried by
+ * a chain rooted at master whose daily cert expires at daily_exp. */
+static void signed_token(const keypair *master, int64_t iat, int64_t grace, int64_t daily_exp,
+                         const char *machine, char **token, ll_cert_chain *chain)
+{
+    int64_t now = (int64_t)time(NULL);
+    keypair sub, proj, daily;
+    crypto_sign_ed25519_keypair(sub.pk, sub.sk);
+    crypto_sign_ed25519_keypair(proj.pk, proj.sk);
+    crypto_sign_ed25519_keypair(daily.pk, daily.sk);
+    chain->submaster = make_cert(master->sk, "submaster", "spk", sub.pk, now - 86400 * 30, now + 86400 * 100);
+    chain->project   = make_cert(sub.sk, "project", "ppk", proj.pk, now - 86400 * 30, now + 86400 * 100);
+    chain->daily     = make_cert(proj.sk, "daily", "dpk", daily.pk, iat - 60, daily_exp);
+    char payload[512];
+    snprintf(payload, sizeof(payload),
+             "{\"iss\":\"licenselatte\",\"sub\":\"KEY1\",\"aid\":\"act-1\",\"pid\":\"proj\","
+             "\"mid\":\"%s\",\"ltype\":\"perpetual\",\"iat\":%lld,\"exp\":%lld,\"grc\":%lld}",
+             machine, (long long)iat, (long long)(iat + 365 * 86400), (long long)grace);
+    *token = make_jwt(daily.sk, payload);
+}
+
+static void chain_free(ll_cert_chain *chain)
+{
+    free((char *)chain->submaster); free((char *)chain->project); free((char *)chain->daily);
+}
+
+/* A stub_sdk whose cache holds a token signed under master. */
+static latte_sdk *signed_sdk(const char *url, const keypair *master, int64_t age, int64_t grace,
+                             int64_t daily_exp_after_iat, const char *machine)
+{
+    latte_sdk *sdk = stub_sdk(url);
+    memcpy(sdk->master_pubs, master->pk, 32);
+    int64_t iat = (int64_t)time(NULL) - age;
+    char *token;
+    ll_cert_chain chain;
+    signed_token(master, iat, grace, iat + daily_exp_after_iat, machine, &token, &chain);
+    ll_file_save_token(STORE, token, &chain);
+    free(token); chain_free(&chain);
+    return sdk;
+}
+
+/* The /v1/renew response carrying a fresh token issued now. */
+static char *renew_response(const keypair *master)
+{
+    char *token;
+    ll_cert_chain chain;
+    int64_t now = (int64_t)time(NULL);
+    signed_token(master, now, 7 * 86400, now + 86400, "machine-hash", &token, &chain);
+    cJSON *root = cJSON_CreateObject(), *c = cJSON_AddObjectToObject(root, "chain");
+    cJSON_AddStringToObject(root, "token", token);
+    cJSON_AddStringToObject(c, "submaster", chain.submaster);
+    cJSON_AddStringToObject(c, "project", chain.project);
+    cJSON_AddStringToObject(c, "daily", chain.daily);
+    char *out = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root); free(token); chain_free(&chain);
+    return out;
+}
+
+static int cached(void)
+{
+    char *raw = NULL;
+    ll_cert_chain *chain = NULL;
+    int has = ll_file_load_token(STORE, &raw, &chain) == 0 && raw[0];
+    free(raw);
+    ll_cert_chain_free(chain);
+    return has;
+}
+
+/* Whether the cached token still verifies and was issued less than a minute ago. */
+static int token_fresh(const keypair *master)
+{
+    char *raw = NULL;
+    ll_cert_chain *chain = NULL;
+    ll_license *lic = NULL;
+    ll_port_error ve;
+    int fresh = ll_file_load_token(STORE, &raw, &chain) == 0 &&
+                ll_verify_activation_any(master->pk, 1, raw, chain, &lic, &ve) == 0 &&
+                (int64_t)time(NULL) - lic->issued_at < 60;
+    ll_license_free(lic); free(raw); ll_cert_chain_free(chain);
+    return fresh;
+}
+
+#define DAY 86400LL
+
+/* Checks twice (the second inside the 5-minute floor), waits for any renewal,
+ * and reports the first verdict in *first. Returns whether the stub received
+ * a renewal request. */
+static int check_and_renew(stub *st, latte_sdk *sdk, latte_status *first)
+{
+    latte_license *lic = NULL;
+    *first = latte_check(sdk, &lic);
+    latte_license_free(lic);
+    /* A second check inside the 5-minute floor must not renew again. */
+    lic = NULL;
+    latte_check(sdk, &lic);
+    latte_license_free(lic);
+    ll_thread_join(&sdk->renew_thread);
+    kill(st->pid, SIGKILL);
+    cJSON_Delete(stub_wait(st));
+    return strncmp(st->request, "POST /v1/renew ", 15) == 0;
+}
+
+static void test_renew_after_grace(void)
+{
+    keypair master, other;
+    crypto_sign_ed25519_keypair(master.pk, master.sk);
+    crypto_sign_ed25519_keypair(other.pk, other.sk);
+    latte_license *lic = NULL;
+    latte_status first;
+    stub st;
+
+    /* Past its 7-day grace window: check reports not activated, renews once,
+     * and the next check returns the licence. */
+    char *resp = renew_response(&master);
+    stub_start(&st, 200, resp);
+    latte_sdk *sdk = signed_sdk(st.url, &master, 10 * DAY, 7 * DAY, DAY, "machine-hash");
+    CHECK(check_and_renew(&st, sdk, &first) == 1 && first == LATTE_ERR_NOT_ACTIVATED,
+          "a token past its grace window renews in the background; check is still not activated");
+    CHECK(token_fresh(&master) && sdk->renew_failed == 0, "the renewal saved the new token");
+    CHECK(latte_check(sdk, &lic) == LATTE_OK && lic && strcmp(lic->activation_id, "act-1") == 0 &&
+          lic->in_grace_period == 0,
+          "a later check returns the licence");
+    latte_license_free(lic);
+    latte_free(sdk);
+
+    /* A daily cert that lapsed long before the token's age matters. */
+    stub_start(&st, 200, resp);
+    sdk = signed_sdk(st.url, &master, 2 * 3600, 7 * DAY, 300, "machine-hash");
+    CHECK(check_and_renew(&st, sdk, &first) == 1 && token_fresh(&master),
+          "a token whose daily cert has expired renews");
+    latte_free(sdk);
+    free(resp);
+
+    /* Tampered: signed under a master the SDK does not trust. */
+    stub_start(&st, 200, "{}");
+    sdk = signed_sdk(st.url, &other, 10 * DAY, 7 * DAY, DAY, "machine-hash");
+    memcpy(sdk->master_pubs, master.pk, 32);
+    CHECK(check_and_renew(&st, sdk, &first) == 0 && first == LATTE_ERR_NOT_ACTIVATED,
+          "a token that does not verify starts no renewal");
+    latte_free(sdk);
+
+    /* Signed, but for another machine. */
+    stub_start(&st, 200, "{}");
+    sdk = signed_sdk(st.url, &master, 10 * DAY, 7 * DAY, DAY, "other-machine");
+    CHECK(check_and_renew(&st, sdk, &first) == 0 && first == LATTE_ERR_NOT_ACTIVATED,
+          "a token for another machine starts no renewal");
+    latte_free(sdk);
+
+    /* The server rejects the renewal: the cache is wiped. */
+    stub_start(&st, 403, "{\"error\":\"license is inactive or expired\"}");
+    sdk = signed_sdk(st.url, &master, 10 * DAY, 7 * DAY, DAY, "machine-hash");
+    CHECK(check_and_renew(&st, sdk, &first) == 1 && !cached() &&
+          latte_check(sdk, &lic) == LATTE_ERR_NOT_ACTIVATED,
+          "a rejected renewal wipes the cache");
+    latte_free(sdk);
+
+    /* The server cannot be reached: the cache stays and the flag is set. */
+    sdk = signed_sdk("http://127.0.0.1:1", &master, 10 * DAY, 7 * DAY, DAY, "machine-hash");
+    latte_check(sdk, &lic);
+    ll_thread_join(&sdk->renew_thread);
+    CHECK(sdk->renew_failed == 1 && cached() && !token_fresh(&master) && latte_check(sdk, &lic) == LATTE_ERR_NOT_ACTIVATED,
+          "a network failure keeps the cache and sets renew_failed");
+    latte_free(sdk);
+}
+
 static void test_deactivate(void)
 {
     stub st;
@@ -368,6 +572,7 @@ int main(void)
     test_machines_and_rename();
     test_renew_errors();
     test_renew_failed();
+    test_renew_after_grace();
     remove(STORE);
     printf("\n%d passed, %d failed\n", pass, fail);
     return fail ? 1 : 0;
