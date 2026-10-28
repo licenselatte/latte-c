@@ -25,15 +25,16 @@ ll_port_error ll_validate_at(const ll_license *lic, const char *machine_id,
 
 /*
  * ll_in_grace_period_at:
- *   The public "please reconnect" flag: 1 once the device has been offline
- *   longer than the 60-minute renewal marker but has not yet exhausted the
- *   grace window.
+ *   The public in_grace_period flag: 1 when the licence is still valid on
+ *   cached data, the SDK has tried to renew it and could not reach the
+ *   server (renewal_failed), and the offline grace window has not run out:
+ *   renewal_failed && 60 min < age < grace_period.
  *
  *   Factored out of domain_to_public() in latte.c so the fixture runner can
  *   assert expect_in_grace_period against the same arithmetic the SDK
  *   actually ships, rather than a copy of it.
  */
-int ll_in_grace_period_at(const ll_license *lic, int64_t now);
+int ll_in_grace_period_at(const ll_license *lic, int64_t now, int renewal_failed);
 
 /*
  * ll_license_is_valid:

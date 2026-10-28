@@ -94,6 +94,30 @@ int main(void)
         CHECK(ll_license_is_valid(&l2) == 0, "is_valid: outside grace");
     }
 
+    /* ll_in_grace_period_at: the flag only counts inside 60 min < age < grace */
+    {
+        int64_t grc = 7*24*3600;
+        ll_license l = {0};
+        l.issued_at    = 1000000;
+        l.grace_period = grc;
+        CHECK(ll_in_grace_period_at(&l, l.issued_at + 2*3600, 0) == 0,
+              "in_grace: 2h-old token, renewal not failed → false");
+        CHECK(ll_in_grace_period_at(&l, l.issued_at + 2*3600, 1) == 1,
+              "in_grace: 2h-old token, renewal failed → true");
+        CHECK(ll_in_grace_period_at(&l, l.issued_at + 30*60, 1) == 0,
+              "in_grace: under 60 min, renewal failed → false");
+        CHECK(ll_in_grace_period_at(&l, l.issued_at + LATTE_MAX_RENEWAL_SECS, 1) == 0,
+              "in_grace: exactly 60 min, renewal failed → false");
+        CHECK(ll_in_grace_period_at(&l, l.issued_at + LATTE_MAX_RENEWAL_SECS + 1, 1) == 1,
+              "in_grace: 60 min + 1s, renewal failed → true");
+        CHECK(ll_in_grace_period_at(&l, l.issued_at + grc - 1, 1) == 1,
+              "in_grace: 1s before the deadline, renewal failed → true");
+        CHECK(ll_in_grace_period_at(&l, l.issued_at + grc, 1) == 0,
+              "in_grace: at the deadline, renewal failed → false");
+        CHECK(ll_in_grace_period_at(&l, l.issued_at + grc + 1, 1) == 0,
+              "in_grace: past the deadline, renewal failed → false");
+    }
+
     printf("\n%d passed, %d failed\n", pass, fail);
     return fail > 0 ? 1 : 0;
 }

@@ -109,6 +109,9 @@ public:
   int64_t issued_at() const noexcept { return lic_->issued_at; }
   int64_t expires_at() const noexcept { return lic_->expires_at; }
   int64_t grace_period_seconds() const noexcept { return lic_->grace_period_seconds; }
+  // True when the licence is still valid on cached data, the SDK has tried to
+  // renew it and could not reach the server, and the offline grace window has
+  // not run out. Advisory: gate features on check(), not on this.
   bool in_grace_period() const noexcept { return lic_->in_grace_period != 0; }
 
   std::map<std::string, std::string> metadata() const {

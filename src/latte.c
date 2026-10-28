@@ -37,6 +37,9 @@ struct latte_sdk {
     ll_thread          renew_thread;
     int                renew_in_flight;
     time_t             last_renew_attempt;
+    /* The last renewal attempt could not reach the server and nothing has
+     * succeeded since. In memory only; guarded by renew_mu. */
+    int                renew_failed;
 };
 
 /* -------------------------------------------------------------------------
@@ -66,15 +69,18 @@ static int hex_decode(const char *hex, unsigned char *out, size_t out_len)
  * Build a public latte_license from the internal ll_license.
  * Mirrors domainToPublic() in helpers.go.
  */
-static latte_license *domain_to_public(const ll_license *d)
+static latte_license *domain_to_public(latte_sdk *sdk, const ll_license *d)
 {
     latte_license *pub = (latte_license *)calloc(1, sizeof(latte_license));
     if (!pub) return NULL;
 
-    /* InGracePeriod = age > maxRenewalTime (60 min) && age < grace_period.
+    /* InGracePeriod = renewal_failed && 60 min < age < grace_period.
      * Shared with the fixture runner via ll_in_grace_period_at so the two
      * cannot drift. */
-    pub->in_grace_period = (uint32_t)ll_in_grace_period_at(d, (int64_t)time(NULL));
+    ll_mutex_lock(&sdk->renew_mu);
+    int renew_failed = sdk->renew_failed;
+    ll_mutex_unlock(&sdk->renew_mu);
+    pub->in_grace_period = (uint32_t)ll_in_grace_period_at(d, (int64_t)time(NULL), renew_failed);
 
     pub->key             = strdup_safe(d->key);
     pub->activation_id   = strdup_safe(d->activation_id);
@@ -174,6 +180,15 @@ static int should_try_renew(latte_sdk *sdk, const ll_license *lic)
     return 1;
 }
 
+/* Clears renew_failed after a renewal that reached the server but produced no
+ * usable token, while the cache still holds the activation it renewed. */
+static void clear_renew_failed(latte_sdk *sdk, const char *activation_id)
+{
+    ll_mutex_lock(&sdk->renew_mu);
+    if (holds_activation(sdk, activation_id)) sdk->renew_failed = 0;
+    ll_mutex_unlock(&sdk->renew_mu);
+}
+
 /* Argument bundle passed to the renewal thread. */
 typedef struct {
     latte_sdk *sdk;
@@ -197,17 +212,20 @@ static void *renew_thread_fn(void *arg)
                                      &chain);
 
     if (pe != LL_PORT_OK) {
-        /* If the server says the license is invalid, wipe the cache, but
-         * only while it still holds the activation this renewed: after a
-         * latte_deactivate and a fresh activation it holds a new one. */
-        if (pe == LL_PORT_ERR_LICENSE_INACTIVE_OR_EXPIRED ||
-            pe == LL_PORT_ERR_LICENSE_NOT_FOUND           ||
-            pe == LL_PORT_ERR_INVALID_LICENSE) {
-            ll_mutex_lock(&sdk->renew_mu);
-            if (holds_activation(sdk, ra->activation_id))
-                ll_file_save_token(sdk->store_path, "", NULL);
-            ll_mutex_unlock(&sdk->renew_mu);
+        /* renew_failed is set only when the server could not be reached, and
+         * only while the cache still holds the activation this renewed: after
+         * a latte_deactivate and a fresh activation it holds a new one. If
+         * the server says the license is invalid, wipe the cache under the
+         * same condition. */
+        int wipe = pe == LL_PORT_ERR_LICENSE_INACTIVE_OR_EXPIRED ||
+                   pe == LL_PORT_ERR_LICENSE_NOT_FOUND           ||
+                   pe == LL_PORT_ERR_INVALID_LICENSE;
+        ll_mutex_lock(&sdk->renew_mu);
+        if (holds_activation(sdk, ra->activation_id)) {
+            sdk->renew_failed = pe == LL_PORT_ERR_NETWORK;
+            if (wipe) ll_file_save_token(sdk->store_path, "", NULL);
         }
+        ll_mutex_unlock(&sdk->renew_mu);
         goto done;
     }
 
@@ -216,11 +234,13 @@ static void *renew_thread_fn(void *arg)
         ll_port_error ve = LL_PORT_OK;
         if (ll_verify_activation_any(sdk->master_pubs, LATTE_MASTER_PUBKEY_COUNT, token, chain, &lic2, &ve) < 0) {
             free(token); ll_cert_chain_free(chain);
+            clear_renew_failed(sdk, ra->activation_id);
             goto done;
         }
         if (ll_validate(lic2, sdk->machine_id) != LL_PORT_OK) {
             ll_license_free(lic2);
             free(token); ll_cert_chain_free(chain);
+            clear_renew_failed(sdk, ra->activation_id);
             goto done;
         }
         ll_license_free(lic2);
@@ -229,8 +249,10 @@ static void *renew_thread_fn(void *arg)
          * that finishes afterwards finds a different activation, or none,
          * and leaves the cache alone. */
         ll_mutex_lock(&sdk->renew_mu);
-        if (holds_activation(sdk, ra->activation_id))
+        if (holds_activation(sdk, ra->activation_id)) {
             ll_file_save_token(sdk->store_path, token, chain);
+            sdk->renew_failed = 0;
+        }
         ll_mutex_unlock(&sdk->renew_mu);
     }
 
@@ -456,7 +478,7 @@ latte_status latte_activate(latte_sdk *sdk, const char *key, latte_license **out
                 int alias_matches = lic->alias && lic->alias[0] != '\0' &&
                                      strcmp(lic->alias, normalized) == 0;
                 if ((key_matches || alias_matches) && ll_license_is_valid(lic)) {
-                    latte_license *pub = domain_to_public(lic);
+                    latte_license *pub = domain_to_public(sdk, lic);
                     ll_license_free(lic);
                     free(raw_token); ll_cert_chain_free(chain);
                     if (!pub) return LATTE_ERR_INTERNAL;
@@ -487,8 +509,11 @@ latte_status latte_activate(latte_sdk *sdk, const char *key, latte_license **out
         return LATTE_ERR_SERVER_INVALID_TOKEN;
     }
 
+    ll_mutex_lock(&sdk->renew_mu);
     ll_file_save_token(sdk->store_path, raw_token, chain);
-    latte_license *pub = domain_to_public(lic);
+    sdk->renew_failed = 0;
+    ll_mutex_unlock(&sdk->renew_mu);
+    latte_license *pub = domain_to_public(sdk, lic);
     ll_license_free(lic);
     free(raw_token); ll_cert_chain_free(chain);
 
@@ -529,7 +554,7 @@ latte_status latte_check(latte_sdk *sdk, latte_license **out)
         return LATTE_ERR_NOT_ACTIVATED;
     }
 
-    latte_license *pub = domain_to_public(lic);
+    latte_license *pub = domain_to_public(sdk, lic);
     ll_license_free(lic);
     if (!pub) return LATTE_ERR_INTERNAL;
     *out = pub;
@@ -555,6 +580,7 @@ latte_status latte_deactivate(latte_sdk *sdk, latte_deactivate_result *out)
      * holds its activation, so it cannot write a token back after this. */
     ll_mutex_lock(&sdk->renew_mu);
     ll_file_save_token(sdk->store_path, "", NULL);
+    sdk->renew_failed = 0;
     ll_mutex_unlock(&sdk->renew_mu);
     return LATTE_OK;
 }

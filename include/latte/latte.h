@@ -110,8 +110,12 @@ typedef struct {
  *
  * issued_at / expires_at are Unix seconds (UTC).
  * grace_period_seconds is the offline tolerance window measured from issued_at.
- * in_grace_period is 1 when the device has been offline > 60 min but the grace
- *   window has not yet elapsed: surface a "please reconnect" warning.
+ * in_grace_period is 1 when the licence is still valid on cached data, the SDK
+ *   has tried to renew it and could not reach the server, and the offline
+ *   grace window has not run out. It is advisory and in memory only: a
+ *   check made before any renewal attempt reports 0, and the flag changes
+ *   only on a latte_check made after an attempt. Gate features on the
+ *   latte_check verdict, never on this flag.
  */
 typedef struct {
   char *key;

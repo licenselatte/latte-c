@@ -33,6 +33,8 @@ int main() {
       std::cout << "  IssuedAt:     " << lic.issued_at() << "\n";
       std::cout << "  ExpiresAt:    " << lic.expires_at() << "\n";
       std::cout << "  InGracePeriod:" << lic.in_grace_period() << "\n";
+      if (lic.in_grace_period())
+        std::cout << "  Couldn't reach the licence server. Connect to the internet to keep using the app.\n";
     } catch (const latte::Error &e) {
       std::cerr << "Activation error: " << e.what() << "\n";
       return 1;
