@@ -97,7 +97,7 @@ int main(int argc, char **argv)
         char buf[64];
         time_t t = (time_t)lic->expires_at;
         strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", gmtime(&t));
-        printf("  OK — expires %s%s\n", buf, lic->in_grace_period ? " [GRACE PERIOD]" : "");
+        printf("  OK — expires %s%s\n", buf, lic->in_grace_period ? " [RENEWAL FAILED, IN GRACE PERIOD]" : "");
         latte_license_free(lic);
     }
 
