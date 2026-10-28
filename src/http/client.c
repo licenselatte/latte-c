@@ -116,7 +116,9 @@ static ll_port_error status_error(long http_code)
     case 403: return LL_PORT_ERR_LICENSE_INACTIVE_OR_EXPIRED;
     case 409: return LL_PORT_ERR_SEAT_LIMIT_REACHED;
     case 401: return LL_PORT_ERR_INVALID_PROJECT_KEY;
-    default:  return LL_PORT_ERR_INVALID_LICENSE;
+    case 429: return LL_PORT_ERR_SERVER;
+    default:  return http_code >= 500 && http_code <= 599 ? LL_PORT_ERR_SERVER
+                                                          : LL_PORT_ERR_INVALID_LICENSE;
     }
 }
 

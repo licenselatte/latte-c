@@ -1,6 +1,6 @@
 /*
- * latte_deactivate, latte_machines and latte_rename_machine against a
- * one-shot HTTP stub on 127.0.0.1.
+ * latte_deactivate, latte_machines, latte_rename_machine and the background
+ * renewal against a one-shot HTTP stub on 127.0.0.1.
  *
  * latte.c is included so the test can build an SDK handle pointed at the
  * stub and at a cache file of its own. The cached token is not a valid
@@ -236,12 +236,66 @@ static void test_machines_and_rename(void)
     latte_free(sdk);
 }
 
+/* Runs one renewal against a stub that answers status, and reports whether
+ * the cached token survived. */
+static int renew_keeps_token(int status)
+{
+    stub st;
+    stub_start(&st, status, "{\"error\":\"stub\"}");
+    latte_sdk *sdk = stub_sdk(st.url);
+    renew_args *ra = (renew_args *)calloc(1, sizeof(renew_args));
+    ra->sdk = sdk;
+    snprintf(ra->activation_id, sizeof(ra->activation_id), "act-1");
+    snprintf(ra->key, sizeof(ra->key), "KEY1");
+    renew_thread_fn(ra);
+    cJSON_Delete(stub_wait(&st));
+    int kept = token_kept();
+    latte_free(sdk);
+    return kept;
+}
+
+static ll_port_error renew_error(int status)
+{
+    stub st;
+    stub_start(&st, status, "{\"error\":\"stub\"}");
+    latte_sdk *sdk = stub_sdk(st.url);
+    char *token = NULL;
+    ll_cert_chain *chain = NULL;
+    ll_port_error pe = ll_http_renew(sdk->http, "act-1", "KEY1", "machine-hash", &token, &chain);
+    cJSON_Delete(stub_wait(&st));
+    latte_free(sdk);
+    return pe;
+}
+
+static void test_renew_errors(void)
+{
+    CHECK(renew_keeps_token(500), "a 500 on renew keeps the cached token");
+    CHECK(renew_keeps_token(503), "a 503 on renew keeps the cached token");
+    CHECK(renew_keeps_token(429), "a 429 on renew keeps the cached token");
+    CHECK(!renew_keeps_token(403), "a 403 on renew wipes the cached token");
+    CHECK(!renew_keeps_token(404), "a 404 on renew wipes the cached token");
+    CHECK(renew_error(500) == LL_PORT_ERR_SERVER, "a 500 on renew is LL_PORT_ERR_SERVER");
+    CHECK(renew_error(429) == LL_PORT_ERR_SERVER, "a 429 on renew is LL_PORT_ERR_SERVER");
+    CHECK(map_network_error(LL_PORT_ERR_SERVER) == LATTE_ERR_INTERNAL,
+          "LL_PORT_ERR_SERVER maps to the public LATTE_ERR_INTERNAL");
+
+    /* Nothing listens on port 1. */
+    latte_sdk *sdk = stub_sdk("http://127.0.0.1:1");
+    char *token = NULL;
+    ll_cert_chain *chain = NULL;
+    CHECK(ll_http_renew(sdk->http, "act-1", "KEY1", "machine-hash", &token, &chain) ==
+          LL_PORT_ERR_NETWORK, "a transport failure on renew is LL_PORT_ERR_NETWORK");
+    CHECK(token_kept(), "a transport failure keeps the cached token");
+    latte_free(sdk);
+}
+
 int main(void)
 {
     printf("=== test_machines ===\n");
     signal(SIGPIPE, SIG_IGN);
     test_deactivate();
     test_machines_and_rename();
+    test_renew_errors();
     remove(STORE);
     printf("\n%d passed, %d failed\n", pass, fail);
     return fail ? 1 : 0;
