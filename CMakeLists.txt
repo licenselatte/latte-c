@@ -148,6 +148,19 @@ target_include_directories(test_storage PRIVATE include src)
 target_link_libraries(test_storage PRIVATE cjson)
 add_test(NAME storage COMMAND test_storage)
 
+# test_storage_atomic: concurrent saves and loads of the cache file (POSIX only).
+if(NOT WIN32)
+    add_executable(test_storage_atomic
+        tests/test_storage_atomic.c
+        src/domain.c
+        src/thread.c
+        src/storage/file.c
+    )
+    target_include_directories(test_storage_atomic PRIVATE include src)
+    target_link_libraries(test_storage_atomic PRIVATE cjson)
+    add_test(NAME storage_atomic COMMAND test_storage_atomic)
+endif()
+
 # test_validate
 add_executable(test_validate
     tests/test_validate.c
