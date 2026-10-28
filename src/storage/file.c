@@ -4,7 +4,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <sys/stat.h>
+#if defined(_WIN32)
+#  include <windows.h>
+#else
+#  include <unistd.h>
+#endif
 
 static char *read_file(const char *path)
 {
@@ -51,17 +55,36 @@ int ll_file_save_token(const char *path,
     cJSON_Delete(root);
     if (!data) return -1;
 
+    /* Write a temp file beside the cache and rename it over, so a reader or a
+     * second writer never sees a partial file. */
+    size_t plen = strlen(path);
+    char *tmp = (char *)malloc(plen + 40);
+    if (!tmp) { free(data); return -1; }
+    FILE *fp;
 #if defined(_WIN32)
-    FILE *fp = fopen(path, "w");
+    static volatile LONG seq;
+    snprintf(tmp, plen + 40, "%s.%lu.%ld.tmp", path,
+             (unsigned long)GetCurrentProcessId(), (long)InterlockedIncrement(&seq));
+    fp = fopen(tmp, "wx");
 #else
-    FILE *fp = fopen(path, "w");
-    if (fp) chmod(path, 0600);
+    snprintf(tmp, plen + 40, "%s.tmpXXXXXX", path);
+    int fd = mkstemp(tmp);
+    fp = fd >= 0 ? fdopen(fd, "w") : NULL;
+    if (fd >= 0 && !fp) { close(fd); remove(tmp); }
 #endif
-    if (!fp) { free(data); return -1; }
-    fputs(data, fp);
+    if (!fp) { free(tmp); free(data); return -1; }
+    int ok = fputs(data, fp) >= 0;
     free(data);
-    fclose(fp);
-    return 0;
+    ok = fflush(fp) == 0 && ok;
+    ok = fclose(fp) == 0 && ok;
+#if defined(_WIN32)
+    ok = ok && MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING);
+#else
+    ok = ok && rename(tmp, path) == 0;
+#endif
+    if (!ok) remove(tmp);
+    free(tmp);
+    return ok ? 0 : -1;
 }
 
 int ll_file_load_token(const char *path,
