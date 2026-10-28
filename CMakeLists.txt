@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(latte-c VERSION 1.5.1 LANGUAGES C CXX)
+project(latte-c VERSION 1.5.2 LANGUAGES C CXX)
 
 # The version the SDK reports to the API in every request body.
 add_compile_definitions(LATTE_VERSION="${PROJECT_VERSION}")
@@ -171,6 +171,7 @@ add_test(NAME entitlements COMMAND test_entitlements)
 # paths resolve without copying them into the build tree.
 add_executable(test_fixtures
     tests/test_fixtures.c
+    src/storage/file.c
     src/verify.c
     src/validate.c
     src/domain.c

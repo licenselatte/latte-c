@@ -10,6 +10,8 @@ static int split_jwt(const char *token,
                      const char **p_start, size_t *p_len,
                      const char **s_start, size_t *s_len)
 {
+    /* A cached token file that lacks a chain field yields NULL here. */
+    if (!token) return -1;
     const char *dot1 = strchr(token, '.');
     if (!dot1) return -1;
     const char *dot2 = strchr(dot1 + 1, '.');

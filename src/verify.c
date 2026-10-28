@@ -63,6 +63,9 @@ int ll_verify_activation_any_at(const unsigned char *master_pubs,
     cJSON *sub_claims = NULL, *proj_claims = NULL,
           *daily_claims = NULL, *act_claims = NULL;
 
+    if (!chain)
+        goto fail;
+
     /* Step 1: verify submaster cert (signed by any trusted master) → extract spk */
     for (size_t i = 0; i < n_master; i++) {
         if (ll_verify_cert(master_pubs + 32 * i, chain->submaster, now, &sub_claims) == 0)
