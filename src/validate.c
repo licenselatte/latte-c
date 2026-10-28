@@ -11,10 +11,10 @@ int ll_license_is_valid(const ll_license *lic)
     return age <= lic->grace_period;
 }
 
-int ll_in_grace_period_at(const ll_license *lic, int64_t now)
+int ll_in_grace_period_at(const ll_license *lic, int64_t now, int renewal_failed)
 {
     int64_t age = now - lic->issued_at;
-    return (age > LATTE_MAX_RENEWAL_SECS && age < lic->grace_period) ? 1 : 0;
+    return (renewal_failed && age > LATTE_MAX_RENEWAL_SECS && age < lic->grace_period) ? 1 : 0;
 }
 
 ll_port_error ll_validate(const ll_license *lic, const char *machine_id)

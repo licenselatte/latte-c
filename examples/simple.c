@@ -48,6 +48,8 @@ int main(void)
     printf("  IssuedAt:     %lld\n", (long long)lic->issued_at);
     printf("  ExpiresAt:    %lld\n", (long long)lic->expires_at);
     printf("  InGracePeriod:%d\n",   lic->in_grace_period);
+    if (lic->in_grace_period)
+        printf("  Couldn't reach the licence server. Connect to the internet to keep using the app.\n");
     latte_license_free(lic);
 
     latte_machine *machines = NULL;

@@ -210,8 +210,14 @@ static void run_fixture(const cJSON *f)
         return;
     }
 
-    CHECK(ll_in_grace_period_at(lic, now) == bool_field(f, "expect_in_grace_period"),
+    /* renewal_failed is optional and defaults to false. */
+    int renewal_failed = bool_field(f, "renewal_failed");
+    int got_grace = ll_in_grace_period_at(lic, now, renewal_failed);
+    int64_t age = now - lic->issued_at;
+    CHECK(got_grace == bool_field(f, "expect_in_grace_period"),
           name, "in_grace_period mismatch");
+    CHECK(got_grace == (renewal_failed && age > 3600 && age < lic->grace_period),
+          name, "in_grace_period is not renewal_failed && 60min < age < grace");
 
     assert_entitlements(lic, f, name);
     ll_license_free(lic);

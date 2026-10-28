@@ -289,6 +289,77 @@ static void test_renew_errors(void)
     latte_free(sdk);
 }
 
+/* Runs one renewal for activation act against url with renew_failed preset
+ * to before, and returns renew_failed afterwards. */
+static int renew_failed_after(const char *url, const char *act, int before, int *kept)
+{
+    latte_sdk *sdk = stub_sdk(url);
+    sdk->renew_failed = before;
+    renew_args *ra = (renew_args *)calloc(1, sizeof(renew_args));
+    ra->sdk = sdk;
+    snprintf(ra->activation_id, sizeof(ra->activation_id), "%s", act);
+    snprintf(ra->key, sizeof(ra->key), "KEY1");
+    renew_thread_fn(ra);
+    int after = sdk->renew_failed;
+    if (kept) *kept = token_kept();
+    latte_free(sdk);
+    return after;
+}
+
+static int renew_failed_after_status(int status, int before, int *kept)
+{
+    stub st;
+    stub_start(&st, status, "{\"error\":\"stub\"}");
+    int after = renew_failed_after(st.url, "act-1", before, kept);
+    cJSON_Delete(stub_wait(&st));
+    return after;
+}
+
+static void test_renew_failed(void)
+{
+    int kept;
+
+    /* Nothing listens on port 1. */
+    CHECK(renew_failed_after("http://127.0.0.1:1", "act-1", 0, &kept) == 1 && kept,
+          "a transport failure on renew sets renew_failed and keeps the token");
+    CHECK(renew_failed_after("http://127.0.0.1:1", "other-act", 0, NULL) == 0,
+          "a transport failure for an activation the cache no longer holds does not set it");
+    CHECK(renew_failed_after_status(500, 1, &kept) == 0 && kept,
+          "a 500 on renew clears renew_failed");
+    CHECK(renew_failed_after_status(429, 1, &kept) == 0 && kept,
+          "a 429 on renew clears renew_failed");
+    CHECK(renew_failed_after_status(403, 1, &kept) == 0 && !kept,
+          "a 403 on renew clears renew_failed and wipes the token");
+    stub bad;
+    stub_start(&bad, 200, "{\"token\":\"a.b.c\",\"chain\":{\"submaster\":\"s\",\"project\":\"p\",\"daily\":\"d\"}}");
+    CHECK(renew_failed_after(bad.url, "act-1", 1, &kept) == 0 && kept,
+          "a renewed token that does not verify clears renew_failed and keeps the old token");
+    cJSON_Delete(stub_wait(&bad));
+
+    stub st;
+    stub_start(&st, 200, "{\"released\":true,\"seat_free_at\":\"2026-10-21T09:00:00Z\"}");
+    latte_sdk *sdk = stub_sdk(st.url);
+    sdk->renew_failed = 1;
+    CHECK(latte_deactivate(sdk, NULL) == LATTE_OK && sdk->renew_failed == 0,
+          "deactivate resets renew_failed");
+    cJSON_Delete(stub_wait(&st));
+    latte_free(sdk);
+
+    /* A token 2h old with a 7-day grace window. */
+    ll_license lic = {0};
+    lic.issued_at    = (int64_t)time(NULL) - 2 * 3600;
+    lic.grace_period = 7 * 24 * 3600;
+    sdk = stub_sdk("http://127.0.0.1:1");
+    latte_license *pub = domain_to_public(sdk, &lic);
+    CHECK(pub && pub->in_grace_period == 0, "a stale token reads in_grace_period false by default");
+    latte_license_free(pub);
+    sdk->renew_failed = 1;
+    pub = domain_to_public(sdk, &lic);
+    CHECK(pub && pub->in_grace_period == 1, "domain_to_public reads renew_failed");
+    latte_license_free(pub);
+    latte_free(sdk);
+}
+
 int main(void)
 {
     printf("=== test_machines ===\n");
@@ -296,6 +367,7 @@ int main(void)
     test_deactivate();
     test_machines_and_rename();
     test_renew_errors();
+    test_renew_failed();
     remove(STORE);
     printf("\n%d passed, %d failed\n", pass, fail);
     return fail ? 1 : 0;
