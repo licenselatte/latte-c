@@ -10,6 +10,7 @@
 typedef enum {
     LL_PORT_OK = 0,
     LL_PORT_ERR_NETWORK,
+    LL_PORT_ERR_SERVER,           /* 5xx or 429: transient, keep stored token */
     LL_PORT_ERR_LICENSE_NOT_FOUND,
     LL_PORT_ERR_LICENSE_INACTIVE_OR_EXPIRED,
     LL_PORT_ERR_SEAT_LIMIT_REACHED,

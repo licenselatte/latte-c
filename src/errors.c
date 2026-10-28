@@ -8,6 +8,7 @@ latte_status map_network_error(ll_port_error e)
     case LL_PORT_ERR_INVALID_PROJECT_KEY:         return LATTE_ERR_INVALID_PROJECT_KEY;
     case LL_PORT_ERR_LICENSE_NOT_FOUND:           return LATTE_ERR_LICENSE_NOT_FOUND;
     case LL_PORT_ERR_NETWORK:                     return LATTE_ERR_NETWORK;
+    case LL_PORT_ERR_SERVER:                      return LATTE_ERR_INTERNAL;
     case LL_PORT_ERR_DEACTIVATION_BLOCKED:        return LATTE_ERR_DEACTIVATION_BLOCKED;
     default:                                       return LATTE_ERR_INTERNAL;
     }
