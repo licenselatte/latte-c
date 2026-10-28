@@ -19,6 +19,7 @@
 #include "../src/errors.h"
 #include "../src/validate.h"
 #include "../src/verify.h"
+#include "../src/storage/file.h"
 
 #define VECTORS_DIR "testdata/vectors"
 
@@ -239,9 +240,114 @@ static char *read_file(const char *path)
     return buf;
 }
 
+/* Decodes a JSON array of hex keys into out (room for max keys); returns the
+ * count, or -1 on a malformed entry. */
+static int decode_keys(const cJSON *arr, unsigned char *out, int max)
+{
+    int n = 0;
+    const cJSON *k = NULL;
+    cJSON_ArrayForEach(k, arr) {
+        if (n == max || !cJSON_IsString(k) || hex_decode32(k->valuestring, out + 32 * n) < 0)
+            return -1;
+        n++;
+    }
+    return n;
+}
+
+/* testdata/anchors.json: a chain is accepted when any one trusted root
+ * signed its submaster cert. */
+static void run_anchors(const cJSON *doc)
+{
+    const cJSON *c = NULL;
+    cJSON_ArrayForEach(c, cJSON_GetObjectItemCaseSensitive(doc, "cases")) {
+        const char *name = str_field(c, "name");
+        unsigned char keys[32 * 8];
+        int n = decode_keys(cJSON_GetObjectItemCaseSensitive(c, "master_public_keys_hex"), keys, 8);
+        int64_t now = 0;
+        if (n < 1 || parse_rfc3339(str_field(c, "now"), &now) < 0) {
+            CHECK(0, name, "bad master_public_keys_hex or now");
+            continue;
+        }
+        const cJSON *cj = cJSON_GetObjectItemCaseSensitive(c, "chain");
+        ll_cert_chain chain = {
+            .submaster = (char *)str_field(cj, "submaster"),
+            .project   = (char *)str_field(cj, "project"),
+            .daily     = (char *)str_field(cj, "daily"),
+        };
+        ll_license *lic = NULL;
+        ll_port_error verr = LL_PORT_OK;
+        int verified = ll_verify_activation_any_at(keys, (size_t)n, str_field(c, "token"),
+                                                   &chain, now, &lic, &verr) == 0;
+        int accepted = verified && ll_validate_at(lic, str_field(c, "machine_id"), now) == LL_PORT_OK;
+        ll_license_free(lic);
+
+        if (strcmp(str_field(c, "expect"), "accept") == 0)
+            CHECK(accepted, name, "expected accept");
+        else
+            CHECK(!verified && strcmp(str_field(c, "expect_stage"), "verify") == 0,
+                  name, "expected a verify-stage rejection");
+    }
+}
+
+/* testdata/cache_files.json: a cached token file the SDK cannot use must
+ * come out as not activated. A crash here takes the whole binary down,
+ * which ctest reports as a failure. */
+static void run_cache_files(const cJSON *doc)
+{
+    const char *path = ".test_fixtures_cache.latte";
+    unsigned char keys[32 * 8];
+    int n = decode_keys(cJSON_GetObjectItemCaseSensitive(doc, "master_public_keys_hex"), keys, 8);
+    int64_t now = 0;
+    if (n < 1 || parse_rfc3339(str_field(doc, "now"), &now) < 0) {
+        CHECK(0, "cache_files.json", "bad master_public_keys_hex or now");
+        return;
+    }
+
+    const cJSON *c = NULL;
+    cJSON_ArrayForEach(c, cJSON_GetObjectItemCaseSensitive(doc, "cases")) {
+        const char *name = str_field(c, "name");
+        const char *contents = str_field(c, "contents");
+        FILE *fp = fopen(path, "wb");
+        if (!fp || !contents) { CHECK(0, name, "cannot write cache file"); if (fp) fclose(fp); continue; }
+        fwrite(contents, 1, strlen(contents), fp);
+        fclose(fp);
+
+        char *token = NULL;
+        ll_cert_chain *chain = NULL;
+        int rejected = 1;
+        if (ll_file_load_token(path, &token, &chain) == 0) {
+            ll_license *lic = NULL;
+            ll_port_error verr = LL_PORT_OK;
+            rejected = ll_verify_activation_any_at(keys, (size_t)n, token, chain, now, &lic, &verr) < 0;
+            ll_license_free(lic);
+        }
+        free(token);
+        ll_cert_chain_free(chain);
+        CHECK(rejected, name, "an unusable cache file verified");
+    }
+    remove(path);
+}
+
+static void run_doc(const char *path, void (*run)(const cJSON *))
+{
+    char *data = read_file(path);
+    cJSON *doc = data ? cJSON_Parse(data) : NULL;
+    if (doc) {
+        run(doc);
+    } else {
+        printf("  FAIL  cannot read %s\n", path);
+        fail++;
+    }
+    cJSON_Delete(doc);
+    free(data);
+}
+
 int main(void)
 {
     printf("=== test_fixtures ===\n");
+
+    run_doc("testdata/anchors.json", run_anchors);
+    run_doc("testdata/cache_files.json", run_cache_files);
 
     DIR *dir = opendir(VECTORS_DIR);
     if (!dir) {
