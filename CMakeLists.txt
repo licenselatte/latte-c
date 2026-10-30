@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.15)
-project(latte-c VERSION 1.6.0 LANGUAGES C CXX)
+project(latte-c VERSION 1.6.0
+        DESCRIPTION "C/C++ SDK for LicenseLatte license activation and offline verification"
+        HOMEPAGE_URL "https://licenselatte.com/docs/sdks/c"
+        LANGUAGES C CXX)
 
 # The version the SDK reports to the API in every request body.
 add_compile_definitions(LATTE_VERSION="${PROJECT_VERSION}")
