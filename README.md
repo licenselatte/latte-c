@@ -125,7 +125,7 @@ No preprocessor define is needed in either case. The static libraries export not
 
 ### Network behaviour
 
-Requests go through WinHTTP with the system certificate store and full certificate validation. The proxy comes from the system settings (WinHTTP automatic proxy on Windows 8.1 and later, the WinHTTP default configuration before that); the `HTTPS_PROXY` / `NO_PROXY` environment variables used by libcurl on other platforms are ignored. The 10-second limit covers the whole request, as with libcurl. WinHTTP follows redirects but refuses one from `https` to `http`.
+Requests go through WinHTTP with the system certificate store and full certificate validation. The proxy comes from the system settings (WinHTTP automatic proxy on Windows 8.1 and later, the WinHTTP default configuration before that); the `HTTPS_PROXY` / `NO_PROXY` environment variables used by libcurl on other platforms are ignored. WinHTTP has no overall timeout, so each step (name resolution, connection, sending, each read) is limited to what remains of the same 10-second budget libcurl applies to the whole request; one stalled `WinHttpSendRequest` can still take up to about 30 seconds before it fails. WinHTTP follows redirects but refuses one from `https` to `http`.
 
 ### Building from source with MSVC
 
@@ -222,7 +222,7 @@ ctest --test-dir build --output-on-failure
 Expected output:
 
 ```
-100% tests passed, 0 tests failed out of 6
+100% tests passed, 0 tests failed out of 14
 
 Total Test time (real) =   0.43 sec
 ```
@@ -234,10 +234,12 @@ Individual test binaries can be run directly for verbose output:
 ./build/test_storage       # JSON record round-trip and legacy format
 ./build/test_validate      # grace-period / expiry rules
 ./build/test_jwt           # base64url decode and EdDSA JWT verify
+./build/test_ed25519       # RFC 8032, Wycheproof and ed25519-speccheck vectors (run from the source dir)
+./build/test_hmac_sha256   # RFC 4231 HMAC-SHA256 vectors
 ./build/test_entitlements  # entitlement decoding and the can/limit accessors
 ./build/test_fixtures      # the 29 shared latte-testvectors fixtures
 ./build/test_machine_id    # testdata/machine_id.json through the shared hash (run from the source dir)
-./build/test_machines      # deactivate / machines / rename against a local HTTP stub (POSIX only)
+./build/test_machines      # deactivate / machines / rename / renewal against a local HTTP stub
 ```
 
 `test_fixtures` is the cross-language parity check: it runs the identical
