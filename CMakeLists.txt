@@ -1,5 +1,14 @@
 cmake_minimum_required(VERSION 3.15)
-project(latte-c VERSION 1.6.0 LANGUAGES C CXX)
+project(latte-c VERSION 1.7.0
+        DESCRIPTION "C/C++ SDK for LicenseLatte license activation and offline verification"
+        HOMEPAGE_URL "https://licenselatte.com/docs/sdks/c"
+        LANGUAGES C CXX)
+
+option(LATTE_BUILD_SHARED "Build the shared library (latte.dll, liblatte.so, liblatte.dylib)" ON)
+option(LATTE_BUILD_STATIC "Build the static library" ON)
+if(NOT LATTE_BUILD_SHARED AND NOT LATTE_BUILD_STATIC)
+    message(FATAL_ERROR "Enable LATTE_BUILD_SHARED, LATTE_BUILD_STATIC or both")
+endif()
 
 # The version the SDK reports to the API in every request body.
 add_compile_definitions(LATTE_VERSION="${PROJECT_VERSION}")
@@ -10,46 +19,59 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Homebrew prefix (Apple Silicon default; Intel uses /usr/local)
-if(APPLE)
-    execute_process(COMMAND brew --prefix
-        OUTPUT_VARIABLE HOMEBREW_PREFIX
-        OUTPUT_STRIP_TRAILING_WHITESPACE)
-    if(HOMEBREW_PREFIX)
-        list(APPEND CMAKE_PREFIX_PATH "${HOMEBREW_PREFIX}")
-        link_directories("${HOMEBREW_PREFIX}/lib")
-        include_directories("${HOMEBREW_PREFIX}/include")
-    endif()
+if(MSVC)
+    # fopen, getenv, strncpy and friends are standard C; silence the CRT's
+    # deprecation of them.
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
+    set(LATTE_WARNINGS /W4)
+    set(LATTE_NO_WARNINGS /w)
+    # Renames every internal global symbol to latte__* (see src/symbols.h).
+    set(LATTE_RENAME "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/symbols.h")
+else()
+    set(LATTE_WARNINGS -Wall -Wextra -Wpedantic)
+    set(LATTE_NO_WARNINGS -w)
+    set(LATTE_RENAME "SHELL:-include ${CMAKE_CURRENT_SOURCE_DIR}/src/symbols.h")
 endif()
 
 # ---------------------------------------------------------------------------
-# Dependencies
+# HTTP transport: WinHTTP on Windows, libcurl elsewhere
 # ---------------------------------------------------------------------------
-find_package(PkgConfig REQUIRED)
-
-pkg_check_modules(LIBCURL   REQUIRED libcurl)
+if(WIN32)
+    set(LATTE_SYSTEM_LIBS winhttp advapi32)
+else()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LIBCURL REQUIRED IMPORTED_TARGET libcurl)
+    set(LATTE_SYSTEM_LIBS PkgConfig::LIBCURL)
+endif()
 
 # ---------------------------------------------------------------------------
-# Vendored cJSON
+# Vendored cJSON and Monocypher. The library compiles them in (latte_vendor);
+# the tests link these plain copies.
 # ---------------------------------------------------------------------------
 add_library(cjson STATIC vendor/cjson/cJSON.c)
 target_include_directories(cjson PUBLIC vendor/cjson)
-target_compile_options(cjson PRIVATE -w)   # suppress cJSON warnings
-# cJSON otherwise marks its functions __declspec(dllexport) on Windows, which
-# turns off MinGW's auto-export and leaves liblatte.dll without latte_*.
+target_compile_options(cjson PRIVATE ${LATTE_NO_WARNINGS})
+# cJSON otherwise marks its functions __declspec(dllexport) on Windows.
 target_compile_definitions(cjson PUBLIC CJSON_HIDE_SYMBOLS)
 
-# ---------------------------------------------------------------------------
-# Vendored Monocypher: Ed25519 (SHA-512) signature verification
-# ---------------------------------------------------------------------------
 add_library(monocypher STATIC
     vendor/monocypher/monocypher.c
     vendor/monocypher/monocypher-ed25519.c)
 target_include_directories(monocypher PUBLIC vendor/monocypher)
-target_compile_options(monocypher PRIVATE -w)
+target_compile_options(monocypher PRIVATE ${LATTE_NO_WARNINGS})
+
+add_library(latte_vendor OBJECT
+    vendor/cjson/cJSON.c
+    vendor/monocypher/monocypher.c
+    vendor/monocypher/monocypher-ed25519.c)
+target_compile_definitions(latte_vendor PRIVATE CJSON_HIDE_SYMBOLS)
+target_compile_options(latte_vendor PRIVATE ${LATTE_NO_WARNINGS} ${LATTE_RENAME})
+set_target_properties(latte_vendor PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    C_VISIBILITY_PRESET hidden)
 
 # ---------------------------------------------------------------------------
-# Library sources
+# Library
 # ---------------------------------------------------------------------------
 set(LATTE_SOURCES
     src/domain.c
@@ -72,71 +94,89 @@ set(LATTE_SOURCES
     src/latte.c
 )
 
-# Static library
-add_library(latte_static STATIC ${LATTE_SOURCES})
-set_target_properties(latte_static PROPERTIES OUTPUT_NAME latte)
+function(latte_library target type)
+    add_library(${target} ${type} ${LATTE_SOURCES} $<TARGET_OBJECTS:latte_vendor>)
+    target_include_directories(${target}
+        PUBLIC  include
+        PRIVATE src vendor/cjson vendor/monocypher)
+    target_compile_definitions(${target} PRIVATE CJSON_HIDE_SYMBOLS)
+    target_compile_options(${target} PRIVATE ${LATTE_WARNINGS} ${LATTE_RENAME})
+    target_link_libraries(${target} PRIVATE ${LATTE_SYSTEM_LIBS})
+    set_target_properties(${target} PROPERTIES
+        OUTPUT_NAME latte
+        C_VISIBILITY_PRESET hidden)
+endfunction()
 
-target_include_directories(latte_static
-    PUBLIC  include
-    PRIVATE src ${LIBCURL_INCLUDE_DIRS}
-)
-target_link_libraries(latte_static
-    PRIVATE cjson monocypher ${LIBCURL_LIBRARIES}
-)
-target_compile_options(latte_static PRIVATE
-    ${LIBCURL_CFLAGS_OTHER}
-    -Wall -Wextra -Wpedantic
-)
-
-# Shared library
-add_library(latte_shared SHARED ${LATTE_SOURCES})
-set_target_properties(latte_shared PROPERTIES OUTPUT_NAME latte)
-
-target_include_directories(latte_shared
-    PUBLIC  include
-    PRIVATE src ${LIBCURL_INCLUDE_DIRS}
-)
-target_link_libraries(latte_shared
-    PRIVATE cjson monocypher ${LIBCURL_LIBRARIES}
-)
-target_compile_options(latte_shared PRIVATE
-    ${LIBCURL_CFLAGS_OTHER}
-    -Wall -Wextra -Wpedantic
-)
-# Keep the vendored cJSON out of the DLL's exports so it cannot clash with an
-# application's own cJSON.
-if(MINGW)
-    target_link_options(latte_shared PRIVATE -Wl,--exclude-libs,ALL)
+if(LATTE_BUILD_STATIC)
+    latte_library(latte_static STATIC)
+    if(MSVC)
+        # The import library of latte.dll is already latte.lib; the static
+        # library is named after the C runtime it was compiled against.
+        if(CMAKE_MSVC_RUNTIME_LIBRARY MATCHES "DLL" OR NOT CMAKE_MSVC_RUNTIME_LIBRARY)
+            set_target_properties(latte_static PROPERTIES OUTPUT_NAME latte_md)
+        else()
+            set_target_properties(latte_static PROPERTIES OUTPUT_NAME latte_mt)
+        endif()
+        set(LATTE_STATIC_DESTINATION lib/static)
+    else()
+        set(LATTE_STATIC_DESTINATION lib)
+    endif()
+    install(TARGETS latte_static ARCHIVE DESTINATION ${LATTE_STATIC_DESTINATION})
 endif()
 
-# Convenience alias
-add_library(latte::latte ALIAS latte_static)
+if(LATTE_BUILD_SHARED)
+    latte_library(latte_shared SHARED)
+    target_compile_definitions(latte_shared PRIVATE LATTE_BUILDING_SHARED)
+    if(MINGW)
+        # No libgcc_s or libwinpthread DLL next to latte.dll.
+        target_link_options(latte_shared PRIVATE -static -static-libgcc)
+    endif()
+    if(NOT MSVC AND NOT APPLE)
+        # Symbols of any static archive linked in stay out of the export table.
+        target_link_options(latte_shared PRIVATE -Wl,--exclude-libs,ALL)
+    endif()
+    install(TARGETS latte_shared
+        RUNTIME DESTINATION bin
+        LIBRARY DESTINATION lib
+        ARCHIVE DESTINATION lib)
+endif()
+
+install(FILES include/latte/latte.h include/latte/latte.hpp DESTINATION include/latte)
+
+if(LATTE_BUILD_STATIC)
+    set(LATTE_LINK latte_static)
+else()
+    set(LATTE_LINK latte_shared)
+endif()
+add_library(latte::latte ALIAS ${LATTE_LINK})
 
 # ---------------------------------------------------------------------------
 # Examples
 # ---------------------------------------------------------------------------
 add_executable(example_simple examples/simple.c)
-target_include_directories(example_simple PRIVATE include)
-target_link_libraries(example_simple PRIVATE latte_static)
+target_link_libraries(example_simple PRIVATE ${LATTE_LINK})
 
 add_executable(example_simple_cpp examples/simple.cpp)
-target_include_directories(example_simple_cpp PRIVATE include)
-target_link_libraries(example_simple_cpp PRIVATE latte_static)
+target_link_libraries(example_simple_cpp PRIVATE ${LATTE_LINK})
 
 # ---------------------------------------------------------------------------
 # CLI tools
 # ---------------------------------------------------------------------------
 add_executable(sdktest tools/sdktest.c)
-target_include_directories(sdktest PRIVATE include src)
-target_link_libraries(sdktest PRIVATE latte_static)
+target_link_libraries(sdktest PRIVATE ${LATTE_LINK})
 
-add_executable(validator tools/validator.c)
-target_include_directories(validator PRIVATE include src)
-target_link_libraries(validator PRIVATE latte_static monocypher)
-
-add_executable(machineid_test tools/machineid_test.c)
-target_include_directories(machineid_test PRIVATE include src)
-target_link_libraries(machineid_test PRIVATE latte_static)
+# These two call internal functions, so they need the static library and its
+# renamed symbols.
+if(LATTE_BUILD_STATIC)
+    add_executable(validator tools/validator.c)
+    add_executable(machineid_test tools/machineid_test.c)
+    foreach(tool validator machineid_test)
+        target_include_directories(${tool} PRIVATE src vendor/cjson)
+        target_compile_definitions(${tool} PRIVATE CJSON_HIDE_SYMBOLS)
+        target_compile_options(${tool} PRIVATE ${LATTE_RENAME})
+        target_link_libraries(${tool} PRIVATE latte_static)
+    endforeach()
+endif()
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -220,8 +260,8 @@ add_executable(test_http_body
     src/http/client.c
     src/domain.c
 )
-target_include_directories(test_http_body PRIVATE include src vendor/cjson ${LIBCURL_INCLUDE_DIRS})
-target_link_libraries(test_http_body PRIVATE cjson ${LIBCURL_LIBRARIES})
+target_include_directories(test_http_body PRIVATE include src vendor/cjson)
+target_link_libraries(test_http_body PRIVATE cjson ${LATTE_SYSTEM_LIBS})
 add_test(NAME http_body COMMAND test_http_body)
 
 # test_anchors
@@ -273,14 +313,7 @@ if(NOT WIN32)
     set(TEST_MACHINES_SOURCES ${LATTE_SOURCES})
     list(REMOVE_ITEM TEST_MACHINES_SOURCES src/latte.c)
     add_executable(test_machines tests/test_machines.c ${TEST_MACHINES_SOURCES})
-    target_include_directories(test_machines PRIVATE include src vendor/cjson
-        ${LIBCURL_INCLUDE_DIRS})
-    target_link_libraries(test_machines PRIVATE cjson monocypher ${LIBCURL_LIBRARIES})
+    target_include_directories(test_machines PRIVATE include src vendor/cjson)
+    target_link_libraries(test_machines PRIVATE cjson monocypher ${LATTE_SYSTEM_LIBS})
     add_test(NAME machines COMMAND test_machines)
 endif()
-
-# ---------------------------------------------------------------------------
-# Install
-# ---------------------------------------------------------------------------
-install(TARGETS latte_static latte_shared DESTINATION lib)
-install(FILES include/latte/latte.h include/latte/latte.hpp DESTINATION include/latte)

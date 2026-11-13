@@ -8,6 +8,19 @@ extern "C" {
 #include <stddef.h>
 #include <stdint.h>
 
+/*
+ * LATTE_API marks the exported functions. It only expands while the shared
+ * library itself is compiled; consumers see nothing and, on Windows, reach
+ * the DLL through its import library.
+ */
+#if defined(LATTE_BUILDING_SHARED) && defined(_WIN32)
+#  define LATTE_API __declspec(dllexport)
+#elif defined(LATTE_BUILDING_SHARED) && defined(__GNUC__)
+#  define LATTE_API __attribute__((visibility("default")))
+#else
+#  define LATTE_API
+#endif
+
 /* Opaque SDK handle: create with latte_new, destroy with latte_free. */
 typedef struct latte_sdk latte_sdk;
 
@@ -164,7 +177,7 @@ typedef struct latte_config latte_config;
  * Returns NULL on allocation failure or if app_id is NULL. Free with
  * latte_config_free() when done - see latte_new().
  */
-latte_config *latte_config_new(const char *app_id);
+LATTE_API latte_config *latte_config_new(const char *app_id);
 
 /*
  * latte_config_set_multi_instance - opt into per-directory token storage.
@@ -181,7 +194,7 @@ latte_config *latte_config_new(const char *app_id);
  *
  * Returns cfg, for chaining. No-op if cfg is NULL.
  */
-latte_config *latte_config_set_multi_instance(latte_config *cfg, int multi_instance);
+LATTE_API latte_config *latte_config_set_multi_instance(latte_config *cfg, int multi_instance);
 
 /*
  * latte_config_set_machine_id - supply the raw machine ID yourself.
@@ -203,7 +216,7 @@ latte_config *latte_config_set_multi_instance(latte_config *cfg, int multi_insta
  * No-op if cfg is NULL. If the copy cannot be allocated, latte_new()
  * returns LATTE_ERR_INTERNAL rather than silently using the OS ID.
  */
-latte_config *latte_config_set_machine_id(latte_config *cfg, const char *raw_machine_id);
+LATTE_API latte_config *latte_config_set_machine_id(latte_config *cfg, const char *raw_machine_id);
 
 /*
  * latte_config_set_machine_name - the name this machine is given when it
@@ -219,10 +232,10 @@ latte_config *latte_config_set_machine_id(latte_config *cfg, const char *raw_mac
  * Returns cfg, for chaining. No-op if cfg is NULL. If the copy cannot be
  * allocated, latte_new() returns LATTE_ERR_INTERNAL.
  */
-latte_config *latte_config_set_machine_name(latte_config *cfg, const char *name);
+LATTE_API latte_config *latte_config_set_machine_name(latte_config *cfg, const char *name);
 
 /* Release a config built with latte_config_new(). */
-void latte_config_free(latte_config *cfg);
+LATTE_API void latte_config_free(latte_config *cfg);
 
 /*
  * latte_new - create one SDK instance per application process.
@@ -239,7 +252,7 @@ void latte_config_free(latte_config *cfg);
  * created, LATTE_ERR_MACHINE_ID_FAILED if the machine fingerprint cannot be
  * read (only when no machine ID was set with latte_config_set_machine_id()).
  */
-latte_status latte_new(const latte_config *config, latte_sdk **out);
+LATTE_API latte_status latte_new(const latte_config *config, latte_sdk **out);
 
 /*
  * latte_activate: validate a license key and activate this machine.
@@ -259,7 +272,7 @@ latte_status latte_new(const latte_config *config, latte_sdk **out);
  * out receives a heap-allocated latte_license on LATTE_OK; free with
  * latte_license_free().
  */
-latte_status latte_activate(latte_sdk *sdk, const char *key,
+LATTE_API latte_status latte_activate(latte_sdk *sdk, const char *key,
                             latte_license **out);
 
 /*
@@ -268,7 +281,7 @@ latte_status latte_activate(latte_sdk *sdk, const char *key,
  * Returns LATTE_ERR_NOT_ACTIVATED if Activate has never been called.
  * Returns LATTE_ERR_LICENSE_EXPIRED if the grace period has elapsed.
  */
-latte_status latte_check(latte_sdk *sdk, latte_license **out);
+LATTE_API latte_status latte_check(latte_sdk *sdk, latte_license **out);
 
 /*
  * latte_can: whether the boolean entitlement named by key is present and
@@ -281,7 +294,7 @@ latte_status latte_check(latte_sdk *sdk, latte_license **out);
  *
  * Returns 0 for a NULL lic or a NULL key.
  */
-int latte_can(const latte_license *lic, const char *key);
+LATTE_API int latte_can(const latte_license *lic, const char *key);
 
 /*
  * latte_limit: the integer entitlement named by key.
@@ -295,7 +308,7 @@ int latte_can(const latte_license *lic, const char *key);
  * holds a boolean rather than an integer misses -- latte_limit on a boolean
  * returns 0, not 1-with-a-1-or-0.
  */
-int latte_limit(const latte_license *lic, const char *key, int64_t *out);
+LATTE_API int latte_limit(const latte_license *lic, const char *key, int64_t *out);
 
 /*
  * latte_has_entitlements: whether the activation token carried an `ent`
@@ -306,7 +319,7 @@ int latte_limit(const latte_license *lic, const char *key, int64_t *out);
  * pre-entitlements behaviour for the one release it takes an installed base
  * to renew. See the latte_entitlement comment above.
  */
-int latte_has_entitlements(const latte_license *lic);
+LATTE_API int latte_has_entitlements(const latte_license *lic);
 
 /*
  * What latte_deactivate reports. Times are Unix seconds (UTC), 0 when absent.
@@ -346,7 +359,7 @@ typedef struct {
  * LATTE_ERR_DEACTIVATION_BLOCKED when the seller's policy refuses the
  * release. out may be NULL.
  */
-latte_status latte_deactivate(latte_sdk *sdk, latte_deactivate_result *out);
+LATTE_API latte_status latte_deactivate(latte_sdk *sdk, latte_deactivate_result *out);
 
 /*
  * One machine holding a seat on the licence, as latte_machines lists it.
@@ -370,10 +383,10 @@ typedef struct {
  * On LATTE_OK, out receives an array of count machines, NULL when count is
  * 0; free it with latte_machines_free().
  */
-latte_status latte_machines(latte_sdk *sdk, latte_machine **out, size_t *count);
+LATTE_API latte_status latte_machines(latte_sdk *sdk, latte_machine **out, size_t *count);
 
 /* Release an array returned by latte_machines. */
-void latte_machines_free(latte_machine *machines, size_t count);
+LATTE_API void latte_machines_free(latte_machine *machines, size_t count);
 
 /* Buffer size that holds any stored machine name: 64 characters of up to
  * four UTF-8 bytes each, plus the terminator. */
@@ -388,17 +401,17 @@ void latte_machines_free(latte_machine *machines, size_t count);
  * stored is written to stored (stored_size bytes, LATTE_MACHINE_NAME_SIZE
  * holds any name); stored may be NULL.
  */
-latte_status latte_rename_machine(latte_sdk *sdk, const char *name,
+LATTE_API latte_status latte_rename_machine(latte_sdk *sdk, const char *name,
                                   char *stored, size_t stored_size);
 
 /* Release a latte_license returned by latte_activate or latte_check. */
-void latte_license_free(latte_license *lic);
+LATTE_API void latte_license_free(latte_license *lic);
 
 /* Release the SDK handle.  Waits for any in-flight renewal thread to finish. */
-void latte_free(latte_sdk *sdk);
+LATTE_API void latte_free(latte_sdk *sdk);
 
 /* Human-readable description of a status code. */
-const char *latte_strerror(latte_status s);
+LATTE_API const char *latte_strerror(latte_status s);
 
 #ifdef __cplusplus
 }
