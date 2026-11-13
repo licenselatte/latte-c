@@ -168,12 +168,13 @@ target_link_libraries(example_simple_cpp PRIVATE ${LATTE_LINK})
 add_executable(sdktest tools/sdktest.c)
 target_link_libraries(sdktest PRIVATE ${LATTE_LINK})
 
-# These two call internal functions, so they need the static library and its
-# renamed symbols.
+# These call internal functions, so they need the static library and its
+# renamed symbols. https_check is what CI runs against real TLS endpoints.
 if(LATTE_BUILD_STATIC)
     add_executable(validator tools/validator.c)
     add_executable(machineid_test tools/machineid_test.c)
-    foreach(tool validator machineid_test)
+    add_executable(https_check tools/https_check.c)
+    foreach(tool validator machineid_test https_check)
         target_include_directories(${tool} PRIVATE src vendor/cjson)
         target_compile_definitions(${tool} PRIVATE CJSON_HIDE_SYMBOLS)
         target_compile_options(${tool} PRIVATE ${LATTE_RENAME})

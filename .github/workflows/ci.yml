@@ -75,3 +75,44 @@ jobs:
       - run: cmake --build build
       - run: ctest --test-dir build --output-on-failure
       - run: sh .github/scripts/check-mingw.sh build/liblatte.dll
+
+  # WinHTTP against real TLS: the API (handshake, certificate), hosts with bad
+  # certificates (must fail), and with the test secrets a full activate, renew
+  # and deactivate. Without the secrets that last step is skipped.
+  windows-https:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x64, platform: x64, msvc: x64, os: windows-latest }
+          - { arch: x86, platform: Win32, msvc: x86, os: windows-latest }
+          - { arch: arm64, platform: ARM64, msvc: arm64, os: windows-11-arm }
+    runs-on: ${{ matrix.os }}
+    # One live run per arch at a time: each arch reuses one activation.
+    concurrency:
+      group: windows-https-${{ matrix.arch }}
+      cancel-in-progress: false
+    env:
+      LATTE_TEST_PUBLISHABLE_KEY: ${{ secrets.LATTE_TEST_PUBLISHABLE_KEY }}
+      LATTE_TEST_LICENSE_KEY: ${{ secrets.LATTE_TEST_LICENSE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1.13.0
+        with:
+          arch: ${{ matrix.msvc }}
+      - run: cmake -S . -B build -A ${{ matrix.platform }} -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DLATTE_BUILD_SHARED=OFF
+      - run: cmake --build build --config Release --target https_check
+      - name: TLS handshake and certificate checks
+        run: |
+          build\Release\https_check.exe --accept https://api.licenselatte.com/v1/renew
+          if %errorlevel% neq 0 exit /b 1
+          build\Release\https_check.exe --reject https://expired.badssl.com/ https://wrong.host.badssl.com/ https://self-signed.badssl.com/ https://untrusted-root.badssl.com/
+        shell: cmd
+      - name: Activate, renew and deactivate
+        if: env.LATTE_TEST_PUBLISHABLE_KEY != '' && env.LATTE_TEST_LICENSE_KEY != ''
+        run: build\Release\https_check.exe --live "%LATTE_TEST_PUBLISHABLE_KEY%" "%LATTE_TEST_LICENSE_KEY%" "latte-c-ci-windows-${{ matrix.arch }}"
+        shell: cmd
+      - name: Live check skipped
+        if: env.LATTE_TEST_PUBLISHABLE_KEY == '' || env.LATTE_TEST_LICENSE_KEY == ''
+        run: echo "::notice::LATTE_TEST_PUBLISHABLE_KEY / LATTE_TEST_LICENSE_KEY are not set; activate, renew and deactivate were not run on ${{ matrix.arch }}."
+        shell: bash
