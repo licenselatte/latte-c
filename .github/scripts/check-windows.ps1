@@ -15,8 +15,8 @@ $failures = New-Object System.Collections.Generic.List[string]
 
 function Fail([string]$msg) { $failures.Add($msg); Write-Host "FAIL: $msg" }
 
-function Dumpbin([string[]]$a) {
-    $out = & dumpbin /nologo @a
+function Invoke-Dumpbin([string[]]$a) {
+    $out = & dumpbin.exe /nologo @a
     if ($LASTEXITCODE -ne 0) { throw "dumpbin $a failed ($LASTEXITCODE)" }
     $out
 }
@@ -26,7 +26,7 @@ function Dumpbin([string[]]$a) {
 # api-ms-win-crt-*: the DLL must carry its own C runtime.
 $allowedDlls = @('kernel32.dll', 'advapi32.dll', 'winhttp.dll')
 $dll = Join-Path $Dir 'bin\latte.dll'
-$deps = Dumpbin @('/dependents', $dll) | ForEach-Object { if ($_ -match '^\s+(\S+\.dll)\s*$') { $Matches[1] } }
+$deps = Invoke-Dumpbin @('/dependents', $dll) | ForEach-Object { if ($_ -match '^\s+(\S+\.dll)\s*$') { $Matches[1] } }
 if (-not $deps) { Fail 'no dependents parsed from latte.dll' }
 foreach ($d in $deps) {
     if ($allowedDlls -notcontains $d.ToLowerInvariant()) { Fail "latte.dll imports $d" }
@@ -34,7 +34,7 @@ foreach ($d in $deps) {
 
 # --- latte.dll: exports --------------------------------------------------------
 # Rows look like: "ordinal hint RVA name"; unnamed (ordinal-only) rows are skipped.
-$exports = Dumpbin @('/exports', $dll) |
+$exports = Invoke-Dumpbin @('/exports', $dll) |
     ForEach-Object { if ($_ -match '^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]{8}\s+(\S+)') { $Matches[1] } }
 if (-not $exports) { Fail 'no exports parsed from latte.dll' }
 foreach ($e in $exports) {
@@ -57,7 +57,7 @@ $crtInline = '__local_stdio_printf_options', '__local_stdio_scanf_options',
 foreach ($lib in 'latte_mt.lib', 'latte_md.lib') {
     $path = Join-Path $Dir "lib\static\$lib"
     $count = 0
-    Dumpbin @('/symbols', $path) | ForEach-Object {
+    Invoke-Dumpbin @('/symbols', $path) | ForEach-Object {
         # "idx offset SECTn|UNDEF|ABS type [()] External | name"
         if ($_ -notmatch '^[0-9A-Fa-f]+\s+[0-9A-Fa-f]{8}\s+(\S+)\s+\S+(?:\s+\(\))?\s+External\s+\|\s+(\S+)') { return }
         if ($Matches[1] -eq 'UNDEF') { return }
