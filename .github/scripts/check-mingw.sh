@@ -1,7 +1,7 @@
 #!/bin/sh
 # Usage: check-mingw.sh <liblatte.dll>
-# Fails unless the MinGW DLL imports only Windows system DLLs (no libgcc,
-# libwinpthread, libstdc++, libcurl, libsodium) and exports only latte_* names.
+# Fails unless the MinGW DLL imports only Windows system DLLs (so no libgcc,
+# libwinpthread, libstdc++ or libcurl) and exports only latte_* names.
 set -eu
 
 dll=${1:?usage: check-mingw.sh <liblatte.dll>}
