@@ -18,13 +18,29 @@
  * drips its handshake or response keeps a synchronous call alive for ever.
  * The request runs asynchronously instead: each step is waited on with what
  * is left of the deadline, and closing the handle cancels it.
+ *
+ * WinHTTP uses the completion, the body it sends and the buffer it reads into
+ * until it reports HANDLE_CLOSING, which may come after ll_http_post gives up
+ * on it. So ll_http_post and the request each hold a reference, and whichever
+ * lets go last frees them.
  */
 typedef struct {
+    volatile LONG  refs;
     HANDLE         event;   /* set by each completion below */
     volatile DWORD status;  /* the WINHTTP_CALLBACK_STATUS_* that set it */
     DWORD          bytes;   /* READ_COMPLETE: bytes read, 0 at the end */
+    char          *body;    /* copy of the request body */
     char          *buf;     /* response buffer a pending read writes into */
 } completion;
+
+static void release(completion *c)
+{
+    if (InterlockedDecrement(&c->refs)) return;
+    CloseHandle(c->event);
+    free(c->body);
+    free(c->buf);
+    free(c);
+}
 
 static void CALLBACK on_status(HINTERNET h, DWORD_PTR context, DWORD status,
                                LPVOID info, DWORD info_len)
@@ -46,6 +62,8 @@ static void CALLBACK on_status(HINTERNET h, DWORD_PTR context, DWORD status,
     }
     c->status = status;
     SetEvent(c->event);
+    /* The last notification for the request. */
+    if (status == WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING) release(c);
 }
 
 /* Whether the step just started completed with want before the deadline. */
@@ -57,15 +75,14 @@ static int wait_for(completion *c, DWORD want, ULONGLONG deadline)
            c->status == want;
 }
 
-/* Whether WinHTTP released the closed request (HANDLE_CLOSING) by limit. */
-static int released(completion *c, ULONGLONG limit)
+/* Waits, until limit at most, for WinHTTP to report the closed request gone. */
+static void wait_closed(completion *c, ULONGLONG limit)
 {
     while (c->status != WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING) {
         ULONGLONG now = GetTickCount64();
         if (now >= limit || WaitForSingleObject(c->event, (DWORD)(limit - now)) != WAIT_OBJECT_0)
-            return 0;
+            return;
     }
-    return 1;
 }
 
 int ll_http_post(const char *url, const char *body, long *status, char **response)
@@ -80,10 +97,13 @@ int ll_http_post(const char *url, const char *body, long *status, char **respons
     *status = 0;
     *response = NULL;
 
-    if (!c || !(c->event = CreateEventW(NULL, FALSE, FALSE, NULL))) {
-        free(c);
-        return -1;
-    }
+    DWORD size = (DWORD)strlen(body);
+    if (!c) return -1;
+    c->refs = 1;
+    c->event = CreateEventW(NULL, FALSE, FALSE, NULL);
+    c->body = (char *)malloc(size ? size : 1);
+    if (!c->event || !c->body) goto done;
+    memcpy(c->body, body, size);
     int n = MultiByteToWideChar(CP_UTF8, 0, url, -1, NULL, 0);
     wurl = n ? (wchar_t *)malloc((size_t)n * sizeof(wchar_t)) : NULL;
     if (!wurl || !MultiByteToWideChar(CP_UTF8, 0, url, -1, wurl, n)) goto done;
@@ -121,10 +141,10 @@ int ll_http_post(const char *url, const char *body, long *status, char **respons
                                  0) == WINHTTP_INVALID_STATUS_CALLBACK)
         goto done;
     watching = 1;
+    InterlockedIncrement(&c->refs);
 
-    DWORD size = (DWORD)strlen(body);
     if (!WinHttpSendRequest(req, L"Content-Type: application/json", (DWORD)-1,
-                            (LPVOID)body, size, size, context) ||
+                            c->body, size, size, context) ||
         !wait_for(c, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, deadline) ||
         !WinHttpReceiveResponse(req, NULL) ||
         !wait_for(c, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, deadline))
@@ -159,17 +179,12 @@ int ll_http_post(const char *url, const char *body, long *status, char **respons
 
 done:
     free(wurl);
-    /* Closing cancels any pending step. Until HANDLE_CLOSING, WinHTTP may
-     * still write to c and c->buf: if that has not come by the grace limit,
-     * they are left to it rather than block the caller. */
+    /* Closing cancels any pending step. If WinHTTP has not let go of the
+     * request by the grace limit, it keeps c and frees it when it does. */
     if (req) WinHttpCloseHandle(req);
-    int keep = req && watching && !released(c, deadline + RELEASE_GRACE_MS);
+    if (watching) wait_closed(c, deadline + RELEASE_GRACE_MS);
     if (con) WinHttpCloseHandle(con);
     if (ses) WinHttpCloseHandle(ses);
-    if (!keep) {
-        CloseHandle(c->event);
-        free(c->buf);
-        free(c);
-    }
+    release(c);
     return rc;
 }
