@@ -96,7 +96,7 @@ static latte_license *domain_to_public(latte_sdk *sdk, const ll_license *d)
                 pub->metadata[i].key   = strdup_safe(d->metadata_keys[i]);
                 pub->metadata[i].value = strdup_safe(d->metadata_values[i]);
             }
-            pub->metadata_count = d->metadata_count;
+            pub->metadata_count = (uint32_t)d->metadata_count;
         }
     }
 
