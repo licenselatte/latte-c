@@ -132,10 +132,22 @@ int main(void)
         free(chain.submaster); free(chain.project); free(chain.daily); free(token);
     }
 
-    /* Every embedded key is a 32-byte hex Ed25519 public key on the curve. */
+    /* The embedded roots, byte for byte. Monocypher cannot check that a key is
+     * of prime order; latte-go's TestMasterPublicKeysArePrimeOrder
+     * (roots_prime_order_test.go) does, for these same four keys. A root that
+     * changes here must be added there and pass first. */
     {
         static const char *const hex[] = LATTE_MASTER_PUBKEYS_HEX;
+        static const char *const pinned[] = {
+            "6773cdfdfb7fc44f13f097449b715e7147a2d73f525d9f09a8d25229e458a2fb", /* root-og */
+            "73358e45a5c77b7f7236d26f5a1756011b522d277bb19ac4869d2e88952705cd", /* root-a */
+            "4f9369b8a4a0fd9be67cd403e4ed92e0d45609772659be4a066c1a9c4eff43fe", /* root-b */
+            "46d45bbc3280df763fcaf7a37055888eeefbb5781784c1f471f4f413d72b123f", /* root-c */
+        };
         size_t n = sizeof(hex) / sizeof(hex[0]);
+        int same = n == sizeof(pinned) / sizeof(pinned[0]);
+        for (size_t i = 0; same && i < n; i++) same = strcmp(hex[i], pinned[i]) == 0;
+        CHECK(same, "the embedded roots are the four checked by latte-go");
         CHECK(n == LATTE_MASTER_PUBKEY_COUNT, "LATTE_MASTER_PUBKEY_COUNT matches the list");
         for (size_t i = 0; i < n; i++) {
             unsigned char pk[32] = {0};
