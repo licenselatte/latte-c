@@ -43,6 +43,12 @@ int ll_http_post(const char *url, const char *body, long *status, char **respons
     curl_easy_setopt(curl, CURLOPT_WRITEDATA,      &resp);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT,        LATTE_HTTP_TIMEOUT_SECS);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    /* A redirect may only lead to https, so it can never downgrade the API's TLS. */
+#if LIBCURL_VERSION_NUM >= 0x075500
+    curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "https");
+#else
+    curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS, (long)CURLPROTO_HTTPS);
+#endif
 
     CURLcode res = curl_easy_perform(curl);
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, status);
