@@ -22,9 +22,16 @@ typedef int sock_t;
 #  define sock_close close
 #endif
 
+#ifdef _WIN32
+#  define sleep_ms(ms) Sleep(ms)
+#else
+#  define sleep_ms(ms) usleep((ms) * 1000)
+#endif
+
 #include "../src/latte.c"
 
 #include "sign.h"
+#include "../src/http/transport.h"
 
 #define STORE "test_machines.latte"
 /* {"aid":"act-1","sub":"KEY1"} */
@@ -44,6 +51,7 @@ typedef struct {
     struct sockaddr_in addr;
     int                status;
     const char        *body;
+    size_t             drip_from;  /* response bytes from here on go one per 100 ms; 0 = none */
     char               url[64];
     char               request[8192];
 } stub;
@@ -72,18 +80,24 @@ static void *stub_serve(void *arg)
                            "HTTP/1.1 %d Stub\r\nContent-Type: application/json\r\n"
                            "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",
                            st->status, strlen(st->body), st->body);
-        send(c, resp, len, 0);
+        size_t at = st->drip_from ? st->drip_from : (size_t)len;
+        if (send(c, resp, (int)at, 0) >= 0)
+            for (; at < (size_t)len; at++) {
+                sleep_ms(100);
+                if (send(c, resp + at, 1, 0) < 0) break;
+            }
     }
     sock_close(c);
     return NULL;
 }
 
 /* Starts a thread that answers one request with status and body (which must
- * outlive stub_wait). */
-static void stub_start(stub *st, int status, const char *body)
+ * outlive stub_wait), sending it a byte at a time from drip_from on. */
+static void stub_start_drip(stub *st, int status, const char *body, size_t drip_from)
 {
     st->status = status;
     st->body = body;
+    st->drip_from = drip_from;
     st->listener = socket(AF_INET, SOCK_STREAM, 0);
     memset(&st->addr, 0, sizeof(st->addr));
     st->addr.sin_family = AF_INET;
@@ -97,6 +111,11 @@ static void stub_start(stub *st, int status, const char *body)
         exit(2);
     }
     snprintf(st->url, sizeof(st->url), "http://127.0.0.1:%d", ntohs(st->addr.sin_port));
+}
+
+static void stub_start(stub *st, int status, const char *body)
+{
+    stub_start_drip(st, status, body, 0);
 }
 
 /* Ends a stub no request will reach: it sees a connection that closes at once. */
@@ -528,6 +547,33 @@ static int renew_failed_after_status(int status, int before, int *kept)
     return after;
 }
 
+/* A server that sends its answer a byte at a time, from drip_from on, is cut
+ * off at the 10 s deadline: neither backend restarts it on each byte. */
+static void test_slow_server(void)
+{
+    static char body[400];
+    memset(body, 'x', sizeof(body) - 1);
+    static const struct { size_t drip_from; const char *name; } cases[] = {
+        {1, "a server dripping its status line and headers is cut off within 15 s"},
+        {120, "a server dripping its body is cut off within 15 s"},
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        stub st;
+        stub_start_drip(&st, 200, body, cases[i].drip_from);
+        char url[96];
+        snprintf(url, sizeof(url), "%s/v1/renew", st.url);
+        long status = 0;
+        char *resp = NULL;
+        time_t start = time(NULL);
+        int r = ll_http_post(url, "{}", &status, &resp);
+        long took = (long)(time(NULL) - start);
+        printf("        (gave up after %ld s)\n", took);
+        CHECK(r == -1 && resp == NULL && took >= 9 && took <= 15, cases[i].name);
+        free(resp);
+        cJSON_Delete(stub_wait(&st));
+    }
+}
+
 static void test_renew_failed(void)
 {
     int kept;
@@ -586,6 +632,7 @@ int main(void)
     test_machines_and_rename();
     test_renew_errors();
     test_renew_failed();
+    test_slow_server();
     test_renew_after_grace();
     remove(STORE);
     printf("\n%d passed, %d failed\n", pass, fail);
