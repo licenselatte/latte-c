@@ -49,7 +49,8 @@ Copy-Item "$stage\bin\latte.dll" "$layout\bin"
 Copy-Item "$stage\lib\latte.lib" "$layout\lib"
 Copy-Item "$stage\lib\static\latte_mt.lib", "$stage\lib\static\latte_md.lib" "$layout\lib\static"
 Copy-Item "$root\LICENSE" $layout
-Copy-Item "$root\vendor\monocypher\LICENCE.md", "$root\vendor\cjson\LICENSE" "$layout\licenses"
+Copy-Item "$root\vendor\monocypher\LICENCE.md" "$layout\licenses\Monocypher.md"
+Copy-Item "$root\vendor\cjson\LICENSE" "$layout\licenses\cJSON.txt"
 (Get-Content -Raw "$root\.github\release\README.txt").Replace('@VERSION@', $Version).Replace('@ARCH@', $Arch) |
     Set-Content -NoNewline "$layout\README.txt"
 

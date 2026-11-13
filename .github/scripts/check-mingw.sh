@@ -11,7 +11,7 @@ rc=0
 for name in $(echo "$dump" | sed -n 's/^[[:space:]]*DLL Name: //p'); do
     case $(echo "$name" | tr 'A-Z' 'a-z') in
         # The UCRT (api-ms-win-crt-*) is a Windows component, msvcrt.dll too.
-        kernel32.dll|advapi32.dll|winhttp.dll|shell32.dll|bcrypt.dll|msvcrt.dll|api-ms-win-crt-*.dll) ;;
+        kernel32.dll|advapi32.dll|winhttp.dll|msvcrt.dll|api-ms-win-crt-*.dll) ;;
         *) echo "disallowed import: $name"; rc=1 ;;
     esac
 done

@@ -24,7 +24,7 @@ function Dumpbin([string[]]$a) {
 # --- latte.dll: imports --------------------------------------------------------
 # Only Windows system DLLs. In particular no VCRUNTIME*, MSVCP*, ucrtbase*,
 # api-ms-win-crt-*: the DLL must carry its own C runtime.
-$allowedDlls = @('kernel32.dll', 'advapi32.dll', 'winhttp.dll', 'shell32.dll', 'bcrypt.dll')
+$allowedDlls = @('kernel32.dll', 'advapi32.dll', 'winhttp.dll')
 $dll = Join-Path $Dir 'bin\latte.dll'
 $deps = Dumpbin @('/dependents', $dll) | ForEach-Object { if ($_ -match '^\s+(\S+\.dll)\s*$') { $Matches[1] } }
 if (-not $deps) { Fail 'no dependents parsed from latte.dll' }
@@ -49,6 +49,11 @@ foreach ($e in $exports) {
 #   __pobj...       compiler-generated object data
 #   .xxx            section-like names such as .CRT$XCU
 $ignore = '^\?\?_C@', '^_{1,2}(real|xmm|ymm|zmm)@', '^_{0,2}pobj', '^\.'
+# The UCRT stdio headers define these as inline functions; MSVC emits a COMDAT
+# "pick any" copy into every object that calls one, so they cannot clash either.
+$crtInline = '__local_stdio_printf_options', '__local_stdio_scanf_options',
+    'printf', 'fprintf', 'sprintf', 'snprintf', '_snprintf', 'vsnprintf', 'vsprintf', 'sscanf', 'fscanf',
+    '_vfprintf_l', '_vsnprintf_l', '_vsprintf_l', '_vsnprintf', '_vsscanf_l', '_vfscanf_l'
 foreach ($lib in 'latte_mt.lib', 'latte_md.lib') {
     $path = Join-Path $Dir "lib\static\$lib"
     $count = 0
@@ -60,6 +65,7 @@ foreach ($lib in 'latte_mt.lib', 'latte_md.lib') {
         foreach ($p in $ignore) { if ($name -match $p) { return } }
         # x86 cdecl decorates every C symbol with a leading underscore.
         if ($Arch -eq 'x86') { $name = $name -replace '^_', '' }
+        if ($crtInline -contains $name) { return }
         $count++
         if ($name -notlike 'latte_*') { Fail "$lib defines $name" }
     }
@@ -83,7 +89,7 @@ function Invoke-Smoke([string]$label, [string]$src, [string[]]$clArgs, [string]$
 }
 
 if ($Smoke) {
-    $sys = @('winhttp.lib', 'advapi32.lib', 'shell32.lib')
+    $sys = @('winhttp.lib', 'advapi32.lib')
     $work = Join-Path $Dir '..\smoke'
     New-Item -ItemType Directory -Force $work | Out-Null
     $work = (Resolve-Path $work).Path

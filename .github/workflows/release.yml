@@ -4,6 +4,14 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+  # A pull request that touches the packaging runs it as a dry run: the zips
+  # and SHA256SUMS are uploaded as artifacts, no release is created.
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - .github/scripts/package-windows.ps1
+      - .github/scripts/check-windows.ps1
+      - .github/release/**
 
 permissions:
   contents: read

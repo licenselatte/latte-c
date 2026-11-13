@@ -17,10 +17,11 @@ Which library to link
   Pick the static library that matches the /MT or /MD setting of your project.
 
 System libraries a static link needs
-  winhttp.lib advapi32.lib shell32.lib
+  winhttp.lib advapi32.lib
 
 32-bit (x86)
-  The functions use the cdecl calling convention.
+  The functions use the cdecl calling convention. From .NET, declare them with
+  CallingConvention = CallingConvention.Cdecl.
 
 Documentation
   https://github.com/licenselatte/latte-c#readme
