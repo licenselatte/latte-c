@@ -8,6 +8,9 @@
 #ifndef WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY
 #define WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY 4
 #endif
+#ifndef WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3
+#define WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3 0x00002000
+#endif
 
 #define READ_CHUNK 4096
 /* How long after the deadline WinHTTP gets to release a cancelled request. */
@@ -118,14 +121,19 @@ int ll_http_post(const char *url, const char *body, long *status, char **respons
 
     ses = WinHttpOpen(NULL, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                       WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, WINHTTP_FLAG_ASYNC);
-    if (!ses) {
-        /* Before Windows 8.1: no automatic proxy, and TLS 1.2 is off by default. */
-        DWORD tls12 = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2;
+    if (!ses) /* Before Windows 8.1 there is no automatic proxy. */
         ses = WinHttpOpen(NULL, WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                           WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, WINHTTP_FLAG_ASYNC);
-        if (ses) WinHttpSetOption(ses, WINHTTP_OPTION_SECURE_PROTOCOLS, &tls12, sizeof(tls12));
-    }
     if (!ses) goto done;
+    /* TLS 1.2 at least. A WinHTTP without TLS 1.3 refuses that flag; Windows
+     * 7 and 8.0 leave TLS 1.2 off until it is set here (7 needs KB3140245).
+     * Where even TLS 1.2 cannot be set, the request fails rather than fall
+     * back to an older protocol. */
+    DWORD tls = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2 | WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3;
+    if (!WinHttpSetOption(ses, WINHTTP_OPTION_SECURE_PROTOCOLS, &tls, sizeof(tls))) {
+        tls = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2;
+        if (!WinHttpSetOption(ses, WINHTTP_OPTION_SECURE_PROTOCOLS, &tls, sizeof(tls))) goto done;
+    }
     con = WinHttpConnect(ses, host, uc.nPort, 0);
     if (!con) goto done;
     req = WinHttpOpenRequest(con, L"POST", uc.lpszUrlPath, NULL, WINHTTP_NO_REFERER,
