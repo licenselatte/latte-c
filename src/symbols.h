@@ -169,6 +169,7 @@
 #define ll_http_client_new latte__ll_http_client_new
 #define ll_http_deactivate latte__ll_http_deactivate
 #define ll_http_machines latte__ll_http_machines
+#define ll_http_post latte__ll_http_post
 #define ll_http_rename_machine latte__ll_http_rename_machine
 #define ll_http_renew latte__ll_http_renew
 #define ll_http_renew_body latte__ll_http_renew_body

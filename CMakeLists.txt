@@ -37,8 +37,10 @@ endif()
 # HTTP transport: WinHTTP on Windows, libcurl elsewhere
 # ---------------------------------------------------------------------------
 if(WIN32)
+    set(LATTE_TRANSPORT src/http/transport_winhttp.c)
     set(LATTE_SYSTEM_LIBS winhttp advapi32)
 else()
+    set(LATTE_TRANSPORT src/http/transport_curl.c)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(LIBCURL REQUIRED IMPORTED_TARGET libcurl)
     set(LATTE_SYSTEM_LIBS PkgConfig::LIBCURL)
@@ -89,6 +91,7 @@ set(LATTE_SOURCES
     src/crypto/jwt.c
     src/crypto/cert.c
     src/http/client.c
+    ${LATTE_TRANSPORT}
     src/storage/file.c
     src/storage/mem.c
     src/latte.c
@@ -258,6 +261,7 @@ add_test(NAME machine_id COMMAND test_machine_id WORKING_DIRECTORY ${CMAKE_SOURC
 add_executable(test_http_body
     tests/test_http_body.c
     src/http/client.c
+    ${LATTE_TRANSPORT}
     src/domain.c
 )
 target_include_directories(test_http_body PRIVATE include src vendor/cjson)
@@ -309,14 +313,15 @@ add_test(NAME jwt COMMAND test_jwt)
 
 # test_machines: deactivate / machines / rename against a local HTTP stub.
 # The test includes src/latte.c itself, so it builds from every other source.
-if(NOT WIN32)
-    set(TEST_MACHINES_SOURCES ${LATTE_SOURCES})
-    list(REMOVE_ITEM TEST_MACHINES_SOURCES src/latte.c)
-    add_executable(test_machines tests/test_machines.c ${TEST_MACHINES_SOURCES})
-    target_include_directories(test_machines PRIVATE include src vendor/cjson)
-    target_link_libraries(test_machines PRIVATE cjson monocypher ${LATTE_SYSTEM_LIBS})
-    add_test(NAME machines COMMAND test_machines)
+set(TEST_MACHINES_SOURCES ${LATTE_SOURCES})
+list(REMOVE_ITEM TEST_MACHINES_SOURCES src/latte.c)
+add_executable(test_machines tests/test_machines.c ${TEST_MACHINES_SOURCES})
+target_include_directories(test_machines PRIVATE include src vendor/cjson)
+target_link_libraries(test_machines PRIVATE cjson monocypher ${LATTE_SYSTEM_LIBS})
+if(WIN32)
+    target_link_libraries(test_machines PRIVATE ws2_32)
 endif()
+add_test(NAME machines COMMAND test_machines)
 
 # test_ed25519: RFC 8032, Wycheproof and ed25519-speccheck vectors (tests/vectors/).
 add_executable(test_ed25519 tests/test_ed25519.c src/crypto/ed25519.c)
