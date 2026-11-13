@@ -14,6 +14,7 @@ Embed license enforcement directly into your C application in a few lines of cod
 ## Table of contents
 
 - [Requirements](#requirements)
+- [Windows](#windows)
 - [Building](#building)
 - [Running the tests](#running-the-tests)
 - [Running the example](#running-the-example)
@@ -46,45 +47,113 @@ Embed license enforcement directly into your C application in a few lines of cod
 
 ## Requirements
 
-| Dependency                          | Version  | Purpose                                     |
-| ----------------------------------- | -------- | ------------------------------------------- |
-| [libsodium](https://libsodium.org)  | ≥ 1.0.18 | Ed25519 signature verification, HMAC-SHA256 |
-| [libcurl](https://curl.se/libcurl/) | ≥ 7.68   | HTTPS activate / renew requests             |
-| CMake                               | ≥ 3.15   | Build system                                |
-| C compiler                          | C11      | clang or gcc                                |
-| pkg-config                          | any      | Dependency discovery                        |
+| Dependency                          | Version  | Purpose                                              |
+| ----------------------------------- | -------- | ---------------------------------------------------- |
+| [libcurl](https://curl.se/libcurl/) | ≥ 7.68   | HTTPS requests on Linux and macOS (not on Windows)   |
+| CMake                               | ≥ 3.15   | Build system                                         |
+| C compiler                          | C11      | gcc, clang, MSVC 2019 16.8 or later, clang-cl, MinGW-w64 |
+| pkg-config                          | any      | Locates libcurl (Linux and macOS only)               |
 
-cJSON is vendored under `vendor/cjson/` — no separate installation needed.
+Everything else is compiled into the library:
+
+| Component | Where | Purpose |
+| --------- | ----- | ------- |
+| [Monocypher](https://monocypher.org) 4.0.3 | `vendor/monocypher/` (CC0 or BSD-2-Clause) | Ed25519 signature verification |
+| [cJSON](https://github.com/DaveGamble/cJSON) | `vendor/cjson/` (MIT) | JSON |
+| SHA-256 / HMAC-SHA256 | `src/crypto/hmac_sha256.c` | Machine ID hash |
+| WinHTTP | part of Windows | HTTPS requests on Windows |
 
 ### macOS (Homebrew)
 
 ```sh
-brew install libsodium pkg-config cmake
+brew install pkg-config cmake
 # libcurl ships with macOS; Homebrew's version also works
 ```
 
 ### Ubuntu / Debian
 
 ```sh
-apt install libsodium-dev libcurl4-openssl-dev cmake pkg-config build-essential
+apt install libcurl4-openssl-dev cmake pkg-config build-essential
 ```
 
 ### Fedora / RHEL
 
 ```sh
-dnf install libsodium-devel libcurl-devel cmake pkgconfig gcc
+dnf install libcurl-devel cmake pkgconfig gcc
 ```
 
-### Windows (MSYS2 / MinGW-w64)
+---
 
-The build relies on `pkg-config` to locate libsodium and libcurl, which native MSVC does not provide. Install [MSYS2](https://www.msys2.org), then from the **MSYS2 MinGW64** shell:
+## Windows
+
+On Windows the SDK is a single self-contained library. It talks to the API through WinHTTP and needs no DLL beyond `KERNEL32.dll`, `ADVAPI32.dll` and `WINHTTP.dll`, which every Windows install has. `latte.dll` carries its own C runtime, so it does not need the Visual C++ Redistributable either.
+
+### Prebuilt binaries
+
+Each [release](https://github.com/licenselatte/latte-c/releases) has one zip per architecture (`x64`, `x86`, `arm64`), `latte-c-<version>-windows-<arch>.zip`, and a `SHA256SUMS` file:
+
+| Path | Content |
+| ---- | ------- |
+| `include/latte/latte.h`, `latte.hpp` | Public headers |
+| `bin/latte.dll` | Shared library |
+| `lib/latte.lib` | Import library for `latte.dll` |
+| `lib/static/latte_mt.lib` | Static library built with `/MT` |
+| `lib/static/latte_md.lib` | Static library built with `/MD` |
+| `licenses/` | Licences of Monocypher and cJSON |
+
+Link the DLL through its import library and ship `latte.dll` next to your executable:
+
+```bat
+cl /I latte-c\include myapp.c latte-c\lib\latte.lib
+```
+
+Or link statically, picking the library that matches your project's runtime setting, plus the two system libraries the SDK uses:
+
+```bat
+cl /MT /I latte-c\include myapp.c latte-c\lib\static\latte_mt.lib winhttp.lib advapi32.lib
+cl /MD /I latte-c\include myapp.c latte-c\lib\static\latte_md.lib winhttp.lib advapi32.lib
+```
+
+No preprocessor define is needed in either case. The static libraries export nothing but `latte_*` and prefix every internal symbol with `latte__`, so they link next to your own copy of cJSON or Monocypher.
+
+### DLL or static library
+
+- **Static** is the simplest option for plugins (VST3, AAX, AU wrappers, DAW extensions): everything ends up in your own binary and there is no second file to load.
+- **DLL**: Windows looks for a dependent DLL next to the host executable, not next to your plugin. A `latte.dll` placed beside a `.vst3` is therefore not found when the host loads the plugin. Either link statically, or load it yourself with its full path, `LoadLibraryExW(path, NULL, LOAD_WITH_ALTERED_SEARCH_PATH)`, and resolve the functions with `GetProcAddress`.
+- **.NET**: the functions use the C calling convention. On x86, declare them with `CallingConvention = CallingConvention.Cdecl` in `[DllImport]`; on x64 and arm64 there is only one convention.
+- Memory the SDK hands out is released with its own functions (`latte_license_free`, `latte_machines_free`, `latte_config_free`, `latte_free`), so the DLL and your program may use different C runtimes.
+
+### Network behaviour
+
+Requests go through WinHTTP with the system certificate store and full certificate validation. The proxy comes from the system settings (WinHTTP automatic proxy on Windows 8.1 and later, the WinHTTP default configuration before that); the `HTTPS_PROXY` / `NO_PROXY` environment variables used by libcurl on other platforms are ignored. The 10-second limit covers the whole request, as with libcurl. WinHTTP follows redirects but refuses one from `https` to `http`.
+
+### Building from source with MSVC
+
+From a Developer Command Prompt (Visual Studio 2019 16.8 or later), or with clang-cl:
+
+```bat
+git clone --recursive https://github.com/licenselatte/latte-c
+cd latte-c
+cmake -B build -A x64 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
+cmake --install build --config Release --prefix dist
+```
+
+`-A Win32` builds for x86 and `-A ARM64` for arm64. `CMAKE_MSVC_RUNTIME_LIBRARY` selects the C runtime: `MultiThreaded` (`/MT`, the static library is named `latte_mt.lib`) or `MultiThreadedDLL` (`/MD`, the default, `latte_md.lib`). `-DLATTE_BUILD_SHARED=OFF` or `-DLATTE_BUILD_STATIC=OFF` skips one of the two libraries.
+
+### Building from source with MSYS2
+
+From the **MSYS2 UCRT64** shell:
 
 ```sh
-pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-pkgconf \
-          mingw-w64-x86_64-libsodium mingw-w64-x86_64-curl
+pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build --output-on-failure
 ```
 
-Run the [Building](#building) and [Running the tests](#running-the-tests) steps below from the same MinGW64 shell — `cmake`, `gcc`, and `ctest` all behave the same as on Linux/macOS. Static and shared libraries are named `liblatte.a` / `liblatte.dll`, and binaries get a `.exe` suffix.
+This produces `liblatte.dll` (with its import library `liblatte.dll.a`) and `liblatte.a`. The DLL links libgcc statically and depends only on Windows system DLLs and the Universal C Runtime that ships with Windows 10 and later. llvm-mingw works the same way.
 
 ---
 
@@ -101,8 +170,8 @@ This produces:
 
 | Artifact       | Path                                                                                |
 | -------------- | ------------------------------------------------------------------------------------ |
-| Static library | `build/liblatte.a`                                                                    |
-| Shared library | `build/liblatte.dylib` (macOS) / `build/liblatte.so` (Linux) / `build/liblatte.dll` (Windows) |
+| Static library | `build/liblatte.a` (MSVC: `latte_mt.lib` or `latte_md.lib`, see [Windows](#windows))  |
+| Shared library | `build/liblatte.dylib` (macOS) / `build/liblatte.so` (Linux) / `latte.dll` (MSVC) / `liblatte.dll` (MinGW) |
 | Example binary | `build/example_simple` (`.exe` on Windows)                                            |
 | Example binary (C++) | `build/example_simple_cpp` (`.exe` on Windows)                                  |
 | CLI tool       | `build/sdktest` (`.exe` on Windows)                                                   |
@@ -110,12 +179,18 @@ This produces:
 
 ### Linking your application
 
-```sh
-# Static
-cc myapp.c -Ipath/to/latte-c/include -Lbuild -llatte -lsodium -lcurl -o myapp
+| Platform | Static | Shared |
+| -------- | ------ | ------ |
+| Linux, macOS | `-llatte -lcurl` (plus `-lpthread` on older glibc) | `-llatte` |
+| MinGW-w64 | `-llatte -lwinhttp -ladvapi32` | `-llatte` |
+| MSVC | `latte_mt.lib` or `latte_md.lib`, `winhttp.lib advapi32.lib` | `latte.lib` |
 
-# Windows (MSYS2 MinGW64 shell)
-gcc myapp.c -Ipath/to/latte-c/include -Lbuild -llatte -lsodium -lcurl -o myapp.exe
+```sh
+# Linux / macOS, static
+cc myapp.c -Ipath/to/latte-c/include -Lbuild -llatte -lcurl -o myapp
+
+# Windows, MSYS2 UCRT64 shell, static
+gcc myapp.c -Ipath/to/latte-c/include -Lbuild -llatte -lwinhttp -ladvapi32 -o myapp.exe
 
 # Or let CMake handle it via FetchContent / add_subdirectory
 ```
@@ -910,11 +985,17 @@ src/
     base64url.{c,h}            RFC 4648 §5 decoder
     jwt.{c,h}                  EdDSA JWT parse + verify
     cert.{c,h}                 verify_cert / pubkey_from_cert helpers
-  http/client.{c,h}            libcurl POST activate / renew / deactivate / machines / rename
+    ed25519.{c,h}              Ed25519 verification (Monocypher plus point checks)
+    hmac_sha256.{c,h}          SHA-256 and HMAC-SHA256
+  http/client.{c,h}            POST activate / renew / deactivate / machines / rename, status mapping
+  http/transport_curl.c        libcurl transport (Linux, macOS)
+  http/transport_winhttp.c     WinHTTP transport (Windows)
+  symbols.h                    Renames every internal global symbol to latte__* (force-included)
   storage/
     file.{c,h}                 JSON token file (+ legacy timestamp:token)
     mem.{c,h}                  In-memory storage for unit tests
 vendor/cjson/                  Vendored cJSON (MIT)
+vendor/monocypher/             Vendored Monocypher 4.0.3 with its Ed25519 module (CC0 or BSD-2-Clause)
 examples/simple.c              Minimal activate → machines → deactivate example (C API)
 examples/simple.cpp            Same example, ported to the C++ wrapper
 tools/sdktest.c                Integration test: activate → check → poll
