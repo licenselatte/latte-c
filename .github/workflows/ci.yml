@@ -45,7 +45,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
-      - uses: ilammy/msvc-dev-cmd@v1.13.0
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
         with:
           arch: ${{ matrix.msvc }}
       # Builds /MT and /MD, runs ctest, checks the layout and compiles the
@@ -63,7 +63,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
-      - uses: msys2/setup-msys2@v2
+      - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2
         with:
           msystem: UCRT64
           install: >-
@@ -92,12 +92,12 @@ jobs:
     concurrency:
       group: windows-https-${{ matrix.arch }}
       cancel-in-progress: false
+    # Only whether the secrets exist; their values reach the live step alone.
     env:
-      LATTE_TEST_PUBLISHABLE_KEY: ${{ secrets.LATTE_TEST_PUBLISHABLE_KEY }}
-      LATTE_TEST_LICENSE_KEY: ${{ secrets.LATTE_TEST_LICENSE_KEY }}
+      HAS_TEST_SECRETS: ${{ secrets.LATTE_TEST_PUBLISHABLE_KEY != '' && secrets.LATTE_TEST_LICENSE_KEY != '' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: ilammy/msvc-dev-cmd@v1.13.0
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
         with:
           arch: ${{ matrix.msvc }}
       - run: cmake -S . -B build -A ${{ matrix.platform }} -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DLATTE_BUILD_SHARED=OFF
@@ -109,10 +109,13 @@ jobs:
           build\Release\https_check.exe --reject https://expired.badssl.com/ https://wrong.host.badssl.com/ https://self-signed.badssl.com/ https://untrusted-root.badssl.com/
         shell: cmd
       - name: Activate, renew and deactivate
-        if: env.LATTE_TEST_PUBLISHABLE_KEY != '' && env.LATTE_TEST_LICENSE_KEY != ''
+        if: env.HAS_TEST_SECRETS == 'true'
+        env:
+          LATTE_TEST_PUBLISHABLE_KEY: ${{ secrets.LATTE_TEST_PUBLISHABLE_KEY }}
+          LATTE_TEST_LICENSE_KEY: ${{ secrets.LATTE_TEST_LICENSE_KEY }}
         run: build\Release\https_check.exe --live "%LATTE_TEST_PUBLISHABLE_KEY%" "%LATTE_TEST_LICENSE_KEY%" "latte-c-ci-windows-${{ matrix.arch }}"
         shell: cmd
       - name: Live check skipped
-        if: env.LATTE_TEST_PUBLISHABLE_KEY == '' || env.LATTE_TEST_LICENSE_KEY == ''
+        if: env.HAS_TEST_SECRETS != 'true'
         run: echo "::notice::LATTE_TEST_PUBLISHABLE_KEY / LATTE_TEST_LICENSE_KEY are not set; activate, renew and deactivate were not run on ${{ matrix.arch }}."
         shell: bash
