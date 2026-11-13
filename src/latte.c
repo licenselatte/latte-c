@@ -11,7 +11,6 @@
 #include "storage/file.h"
 #include "http/client.h"
 #include "thread.h"
-#include <sodium.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -373,8 +372,6 @@ latte_status latte_new(const latte_config *config, latte_sdk **out)
     if (!config || !config->app_id) return LATTE_ERR_INVALID_CONFIG;
     if (config->machine_id_failed || config->machine_name_failed) return LATTE_ERR_INTERNAL;
     const char *app_id = config->app_id;
-
-    if (sodium_init() < 0) return LATTE_ERR_INTERNAL;
 
     ll_env env;
     const char *app_key = NULL;

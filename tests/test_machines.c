@@ -8,6 +8,8 @@
  */
 #include "../src/latte.c"
 
+#include "sign.h"
+
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <signal.h>
@@ -122,16 +124,6 @@ static int token_kept(void)
     return kept;
 }
 
-typedef struct { unsigned char pk[32], sk[64]; } keypair;
-
-static char *b64url(const unsigned char *in, size_t len)
-{
-    size_t cap = sodium_base64_ENCODED_LEN(len, sodium_base64_VARIANT_URLSAFE_NO_PADDING);
-    char *out = (char *)malloc(cap);
-    sodium_bin2base64(out, cap, in, len, sodium_base64_VARIANT_URLSAFE_NO_PADDING);
-    return out;
-}
-
 static char *make_jwt(const unsigned char *sk, const char *payload)
 {
     const char *header = "{\"alg\":\"EdDSA\",\"typ\":\"JWT\"}";
@@ -139,8 +131,8 @@ static char *make_jwt(const unsigned char *sk, const char *payload)
     char *p = b64url((const unsigned char *)payload, strlen(payload));
     char msg[2048];
     snprintf(msg, sizeof(msg), "%s.%s", h, p);
-    unsigned char sig[crypto_sign_ed25519_BYTES];
-    crypto_sign_ed25519_detached(sig, NULL, (const unsigned char *)msg, strlen(msg), sk);
+    unsigned char sig[64];
+    crypto_ed25519_sign(sig, sk, (const unsigned char *)msg, strlen(msg));
     char *s = b64url(sig, sizeof(sig));
     char *jwt = (char *)malloc(strlen(msg) + strlen(s) + 2);
     sprintf(jwt, "%s.%s", msg, s);
@@ -153,7 +145,7 @@ static char *make_cert(const unsigned char *parent_sk, const char *sub, const ch
                        const unsigned char *pub, int64_t iat, int64_t exp)
 {
     char hex[65], payload[512];
-    sodium_bin2hex(hex, sizeof(hex), pub, 32);
+    hex32(pub, hex);
     snprintf(payload, sizeof(payload),
              "{\"iss\":\"licenselatte\",\"sub\":\"%s\",\"pid\":\"proj\",\"%s\":\"%s\","
              "\"iat\":%lld,\"exp\":%lld}",
@@ -167,10 +159,7 @@ static void signed_token(const keypair *master, int64_t iat, int64_t grace, int6
                          const char *machine, char **token, ll_cert_chain *chain)
 {
     int64_t now = (int64_t)time(NULL);
-    keypair sub, proj, daily;
-    crypto_sign_ed25519_keypair(sub.pk, sub.sk);
-    crypto_sign_ed25519_keypair(proj.pk, proj.sk);
-    crypto_sign_ed25519_keypair(daily.pk, daily.sk);
+    keypair sub = gen(), proj = gen(), daily = gen();
     chain->submaster = make_cert(master->sk, "submaster", "spk", sub.pk, now - 86400 * 30, now + 86400 * 100);
     chain->project   = make_cert(sub.sk, "project", "ppk", proj.pk, now - 86400 * 30, now + 86400 * 100);
     chain->daily     = make_cert(proj.sk, "daily", "dpk", daily.pk, iat - 60, daily_exp);
@@ -265,9 +254,7 @@ static int check_and_renew(stub *st, latte_sdk *sdk, latte_status *first)
 
 static void test_renew_after_grace(void)
 {
-    keypair master, other;
-    crypto_sign_ed25519_keypair(master.pk, master.sk);
-    crypto_sign_ed25519_keypair(other.pk, other.sk);
+    keypair master = gen(), other = gen();
     latte_license *lic = NULL;
     latte_status first;
     stub st;

@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <sodium.h>
+#include "sign.h"
 
 #include "../src/verify.h"
 
@@ -18,14 +18,6 @@ static int pass = 0, fail = 0;
         else      { printf("  FAIL  %s\n", name); fail++; } \
     } while(0)
 
-static char *b64url(const unsigned char *in, size_t len)
-{
-    size_t cap = sodium_base64_ENCODED_LEN(len, sodium_base64_VARIANT_URLSAFE_NO_PADDING);
-    char *out = (char *)malloc(cap);
-    if (out) sodium_bin2base64(out, cap, in, len, sodium_base64_VARIANT_URLSAFE_NO_PADDING);
-    return out;
-}
-
 static char *make_jwt(const unsigned char *sk, const char *payload)
 {
     const char *header = "{\"alg\":\"EdDSA\",\"typ\":\"JWT\"}";
@@ -35,8 +27,8 @@ static char *make_jwt(const unsigned char *sk, const char *payload)
     char *msg = (char *)malloc(msg_len + 1);
     snprintf(msg, msg_len + 1, "%s.%s", h, p);
 
-    unsigned char sig[crypto_sign_ed25519_BYTES];
-    crypto_sign_ed25519_detached(sig, NULL, (const unsigned char *)msg, msg_len, sk);
+    unsigned char sig[64];
+    crypto_ed25519_sign(sig, sk, (const unsigned char *)msg, msg_len);
     char *s = b64url(sig, sizeof(sig));
 
     size_t jwt_len = msg_len + 1 + strlen(s) + 1;
@@ -44,15 +36,6 @@ static char *make_jwt(const unsigned char *sk, const char *payload)
     snprintf(jwt, jwt_len, "%s.%s", msg, s);
     free(h); free(p); free(msg); free(s);
     return jwt;
-}
-
-typedef struct { unsigned char pk[32], sk[64]; } keypair;
-
-static keypair gen(void)
-{
-    keypair k;
-    crypto_sign_ed25519_keypair(k.pk, k.sk);
-    return k;
 }
 
 #define DAY_START 1791331200LL           /* 2026-10-07T00:00:00Z */
@@ -72,20 +55,20 @@ static int verify_with(const char *daily_iss, int64_t daily_iat,
     int64_t cert_start = DAY_START - 30 * 86400;
     int64_t cert_end = cert_start + 180 * 86400;
 
-    sodium_bin2hex(hex, sizeof(hex), sub.pk, 32);
+    hex32(sub.pk, hex);
     snprintf(payload, sizeof(payload),
         "{\"iss\":\"licenselatte\",\"sub\":\"submaster\",\"spk\":\"%s\",\"iat\":%lld,\"exp\":%lld}",
         hex, (long long)cert_start, (long long)cert_end);
     ll_cert_chain chain = {0};
     chain.submaster = make_jwt(master.sk, payload);
 
-    sodium_bin2hex(hex, sizeof(hex), proj.pk, 32);
+    hex32(proj.pk, hex);
     snprintf(payload, sizeof(payload),
         "{\"iss\":\"licenselatte\",\"sub\":\"project\",\"pid\":\"proj\",\"ppk\":\"%s\",\"iat\":%lld,\"exp\":%lld}",
         hex, (long long)cert_start, (long long)cert_end);
     chain.project = make_jwt(sub.sk, payload);
 
-    sodium_bin2hex(hex, sizeof(hex), daily.pk, 32);
+    hex32(daily.pk, hex);
     snprintf(payload, sizeof(payload),
         "{\"iss\":\"%s\",\"sub\":\"daily\",\"pid\":\"proj\",\"dpk\":\"%s\",\"day\":\"2026-10-07\",\"iat\":%lld,\"exp\":%lld}",
         daily_iss, hex, (long long)daily_iat, (long long)DAILY_EXP);
@@ -108,11 +91,6 @@ static int verify_with(const char *daily_iss, int64_t daily_iat,
 
 int main(void)
 {
-    if (sodium_init() < 0) {
-        fprintf(stderr, "sodium_init failed\n");
-        return 1;
-    }
-
     printf("=== test_daily_cert ===\n");
 
     int64_t late = DAY_START + 23 * 3600 + 59 * 60;   /* activated 23:59 UTC */

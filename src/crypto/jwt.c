@@ -1,6 +1,6 @@
 #include "jwt.h"
 #include "base64url.h"
-#include <sodium.h>
+#include "ed25519.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -31,7 +31,7 @@ int ll_jwt_verify_ed25519(const char *token,
                            cJSON **claims_out)
 {
     *claims_out = NULL;
-    if (pubkey_len != crypto_sign_ed25519_PUBLICKEYBYTES) return -1;
+    if (pubkey_len != 32) return -1;
 
     const char *h_start, *p_start, *s_start;
     size_t h_len, p_len, s_len;
@@ -43,7 +43,7 @@ int ll_jwt_verify_ed25519(const char *token,
     size_t sig_len = 0;
     if (ll_base64url_decode(s_start, s_len, &sig_bytes, &sig_len) < 0)
         return -1;
-    if (sig_len != crypto_sign_ed25519_BYTES) {
+    if (sig_len != 64) {
         free(sig_bytes);
         return -1;
     }
@@ -56,7 +56,7 @@ int ll_jwt_verify_ed25519(const char *token,
     signed_msg[h_len] = '.';
     memcpy(signed_msg + h_len + 1, p_start, p_len);
 
-    int sig_ok = crypto_sign_ed25519_verify_detached(sig_bytes, signed_msg, signed_len, pubkey);
+    int sig_ok = ll_ed25519_verify(sig_bytes, signed_msg, signed_len, pubkey);
     free(sig_bytes);
     free(signed_msg);
     if (sig_ok != 0) return -1;

@@ -6,10 +6,11 @@
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
-#include <sodium.h>
+#include "sign.h"
 
 #include "../src/constants.h"
 #include "../src/verify.h"
+#include "../src/crypto/ed25519.h"
 
 static int pass = 0, fail = 0;
 
@@ -18,14 +19,6 @@ static int pass = 0, fail = 0;
         if (expr) { printf("  PASS  %s\n", name); pass++; } \
         else      { printf("  FAIL  %s\n", name); fail++; } \
     } while(0)
-
-static char *b64url(const unsigned char *in, size_t len)
-{
-    size_t cap = sodium_base64_ENCODED_LEN(len, sodium_base64_VARIANT_URLSAFE_NO_PADDING);
-    char *out = (char *)malloc(cap);
-    if (out) sodium_bin2base64(out, cap, in, len, sodium_base64_VARIANT_URLSAFE_NO_PADDING);
-    return out;
-}
 
 static char *make_jwt(const unsigned char *sk, const char *payload)
 {
@@ -36,8 +29,8 @@ static char *make_jwt(const unsigned char *sk, const char *payload)
     char *msg = (char *)malloc(msg_len + 1);
     snprintf(msg, msg_len + 1, "%s.%s", h, p);
 
-    unsigned char sig[crypto_sign_ed25519_BYTES];
-    crypto_sign_ed25519_detached(sig, NULL, (const unsigned char *)msg, msg_len, sk);
+    unsigned char sig[64];
+    crypto_ed25519_sign(sig, sk, (const unsigned char *)msg, msg_len);
     char *s = b64url(sig, sizeof(sig));
 
     size_t jwt_len = msg_len + 1 + strlen(s) + 1;
@@ -45,20 +38,6 @@ static char *make_jwt(const unsigned char *sk, const char *payload)
     snprintf(jwt, jwt_len, "%s.%s", msg, s);
     free(h); free(p); free(msg); free(s);
     return jwt;
-}
-
-static void hex32(const unsigned char *pk, char out[65])
-{
-    sodium_bin2hex(out, 65, pk, 32);
-}
-
-typedef struct { unsigned char pk[32], sk[64]; } keypair;
-
-static keypair gen(void)
-{
-    keypair k;
-    crypto_sign_ed25519_keypair(k.pk, k.sk);
-    return k;
 }
 
 /* Builds a full chain whose submaster cert is signed by master. */
@@ -109,13 +88,19 @@ static int verifies(const unsigned char *trusted, size_t n, const keypair *signe
     return ok;
 }
 
+/* Whether pk decodes to a curve point. With R = B, S = 1 and h = 0 the
+ * equation [8]([S]B - [h]pk - R) = 0 holds for every pk Monocypher can decode. */
+static int on_curve(const unsigned char pk[32])
+{
+    static const unsigned char one[32] = {1}, h[32] = {0};
+    unsigned char sig[64] = {0};
+    crypto_eddsa_scalarbase(sig, one);
+    sig[32] = 1;
+    return crypto_eddsa_check_equation(sig, pk, h) == 0;
+}
+
 int main(void)
 {
-    if (sodium_init() < 0) {
-        fprintf(stderr, "sodium_init failed\n");
-        return 1;
-    }
-
     printf("=== test_anchors ===\n");
 
     keypair a = gen(), b = gen(), c = gen(), outsider = gen();
@@ -153,12 +138,14 @@ int main(void)
         size_t n = sizeof(hex) / sizeof(hex[0]);
         CHECK(n == LATTE_MASTER_PUBKEY_COUNT, "LATTE_MASTER_PUBKEY_COUNT matches the list");
         for (size_t i = 0; i < n; i++) {
-            unsigned char pk[32];
-            size_t bin_len = 0;
-            int ok = strlen(hex[i]) == 64 &&
-                     sodium_hex2bin(pk, sizeof(pk), hex[i], 64, NULL, &bin_len, NULL) == 0 &&
-                     bin_len == 32 &&
-                     crypto_core_ed25519_is_valid_point(pk) == 1;
+            unsigned char pk[32] = {0};
+            int ok = strlen(hex[i]) == 64;
+            for (int j = 0; ok && j < 32; j++) {
+                unsigned v = 0;
+                ok = sscanf(hex[i] + 2 * j, "%2x", &v) == 1;
+                pk[j] = (unsigned char)v;
+            }
+            ok = ok && ll_ed25519_point_ok(pk) && on_curve(pk);
             char name[64];
             snprintf(name, sizeof(name), "embedded master key %zu is a valid Ed25519 key", i);
             CHECK(ok, name);

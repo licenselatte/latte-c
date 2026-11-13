@@ -27,7 +27,6 @@ endif()
 # ---------------------------------------------------------------------------
 find_package(PkgConfig REQUIRED)
 
-pkg_check_modules(LIBSODIUM REQUIRED libsodium)
 pkg_check_modules(LIBCURL   REQUIRED libcurl)
 
 # ---------------------------------------------------------------------------
@@ -39,6 +38,15 @@ target_compile_options(cjson PRIVATE -w)   # suppress cJSON warnings
 # cJSON otherwise marks its functions __declspec(dllexport) on Windows, which
 # turns off MinGW's auto-export and leaves liblatte.dll without latte_*.
 target_compile_definitions(cjson PUBLIC CJSON_HIDE_SYMBOLS)
+
+# ---------------------------------------------------------------------------
+# Vendored Monocypher: Ed25519 (SHA-512) signature verification
+# ---------------------------------------------------------------------------
+add_library(monocypher STATIC
+    vendor/monocypher/monocypher.c
+    vendor/monocypher/monocypher-ed25519.c)
+target_include_directories(monocypher PUBLIC vendor/monocypher)
+target_compile_options(monocypher PRIVATE -w)
 
 # ---------------------------------------------------------------------------
 # Library sources
@@ -54,6 +62,8 @@ set(LATTE_SOURCES
     src/verify.c
     src/crypto/key.c
     src/crypto/base64url.c
+    src/crypto/ed25519.c
+    src/crypto/hmac_sha256.c
     src/crypto/jwt.c
     src/crypto/cert.c
     src/http/client.c
@@ -68,13 +78,13 @@ set_target_properties(latte_static PROPERTIES OUTPUT_NAME latte)
 
 target_include_directories(latte_static
     PUBLIC  include
-    PRIVATE src ${LIBSODIUM_INCLUDE_DIRS} ${LIBCURL_INCLUDE_DIRS}
+    PRIVATE src ${LIBCURL_INCLUDE_DIRS}
 )
 target_link_libraries(latte_static
-    PRIVATE cjson ${LIBSODIUM_LIBRARIES} ${LIBCURL_LIBRARIES}
+    PRIVATE cjson monocypher ${LIBCURL_LIBRARIES}
 )
 target_compile_options(latte_static PRIVATE
-    ${LIBSODIUM_CFLAGS_OTHER} ${LIBCURL_CFLAGS_OTHER}
+    ${LIBCURL_CFLAGS_OTHER}
     -Wall -Wextra -Wpedantic
 )
 
@@ -84,13 +94,13 @@ set_target_properties(latte_shared PROPERTIES OUTPUT_NAME latte)
 
 target_include_directories(latte_shared
     PUBLIC  include
-    PRIVATE src ${LIBSODIUM_INCLUDE_DIRS} ${LIBCURL_INCLUDE_DIRS}
+    PRIVATE src ${LIBCURL_INCLUDE_DIRS}
 )
 target_link_libraries(latte_shared
-    PRIVATE cjson ${LIBSODIUM_LIBRARIES} ${LIBCURL_LIBRARIES}
+    PRIVATE cjson monocypher ${LIBCURL_LIBRARIES}
 )
 target_compile_options(latte_shared PRIVATE
-    ${LIBSODIUM_CFLAGS_OTHER} ${LIBCURL_CFLAGS_OTHER}
+    ${LIBCURL_CFLAGS_OTHER}
     -Wall -Wextra -Wpedantic
 )
 # Keep the vendored cJSON out of the DLL's exports so it cannot clash with an
@@ -122,7 +132,7 @@ target_link_libraries(sdktest PRIVATE latte_static)
 
 add_executable(validator tools/validator.c)
 target_include_directories(validator PRIVATE include src)
-target_link_libraries(validator PRIVATE latte_static ${LIBSODIUM_LIBRARIES})
+target_link_libraries(validator PRIVATE latte_static monocypher)
 
 add_executable(machineid_test tools/machineid_test.c)
 target_include_directories(machineid_test PRIVATE include src)
@@ -190,17 +200,18 @@ add_executable(test_fixtures
     src/domain.c
     src/entitlements.c
     src/crypto/base64url.c
+    src/crypto/ed25519.c
     src/crypto/jwt.c
     src/crypto/cert.c
 )
-target_include_directories(test_fixtures PRIVATE include src vendor/cjson ${LIBSODIUM_INCLUDE_DIRS})
-target_link_libraries(test_fixtures PRIVATE cjson ${LIBSODIUM_LIBRARIES})
+target_include_directories(test_fixtures PRIVATE include src vendor/cjson)
+target_link_libraries(test_fixtures PRIVATE cjson monocypher)
 add_test(NAME fixtures COMMAND test_fixtures WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # test_machine_id: testdata/machine_id.json through the shared hash.
-add_executable(test_machine_id tests/test_machine_id.c src/machineid.c)
-target_include_directories(test_machine_id PRIVATE include src vendor/cjson ${LIBSODIUM_INCLUDE_DIRS})
-target_link_libraries(test_machine_id PRIVATE cjson ${LIBSODIUM_LIBRARIES})
+add_executable(test_machine_id tests/test_machine_id.c src/machineid.c src/crypto/hmac_sha256.c)
+target_include_directories(test_machine_id PRIVATE include src vendor/cjson)
+target_link_libraries(test_machine_id PRIVATE cjson monocypher)
 add_test(NAME machine_id COMMAND test_machine_id WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # test_http_body
@@ -221,11 +232,12 @@ add_executable(test_anchors
     src/domain.c
     src/entitlements.c
     src/crypto/base64url.c
+    src/crypto/ed25519.c
     src/crypto/jwt.c
     src/crypto/cert.c
 )
-target_include_directories(test_anchors PRIVATE include src vendor/cjson ${LIBSODIUM_INCLUDE_DIRS})
-target_link_libraries(test_anchors PRIVATE cjson ${LIBSODIUM_LIBRARIES})
+target_include_directories(test_anchors PRIVATE include src vendor/cjson)
+target_link_libraries(test_anchors PRIVATE cjson monocypher)
 add_test(NAME anchors COMMAND test_anchors)
 
 # test_daily_cert
@@ -236,21 +248,23 @@ add_executable(test_daily_cert
     src/domain.c
     src/entitlements.c
     src/crypto/base64url.c
+    src/crypto/ed25519.c
     src/crypto/jwt.c
     src/crypto/cert.c
 )
-target_include_directories(test_daily_cert PRIVATE include src vendor/cjson ${LIBSODIUM_INCLUDE_DIRS})
-target_link_libraries(test_daily_cert PRIVATE cjson ${LIBSODIUM_LIBRARIES})
+target_include_directories(test_daily_cert PRIVATE include src vendor/cjson)
+target_link_libraries(test_daily_cert PRIVATE cjson monocypher)
 add_test(NAME daily_cert COMMAND test_daily_cert)
 
 # test_jwt
 add_executable(test_jwt
     tests/test_jwt.c
     src/crypto/base64url.c
+    src/crypto/ed25519.c
     src/crypto/jwt.c
 )
-target_include_directories(test_jwt PRIVATE include src ${LIBSODIUM_INCLUDE_DIRS})
-target_link_libraries(test_jwt PRIVATE cjson ${LIBSODIUM_LIBRARIES})
+target_include_directories(test_jwt PRIVATE include src)
+target_link_libraries(test_jwt PRIVATE cjson monocypher)
 add_test(NAME jwt COMMAND test_jwt)
 
 # test_machines: deactivate / machines / rename against a local HTTP stub.
@@ -260,8 +274,8 @@ if(NOT WIN32)
     list(REMOVE_ITEM TEST_MACHINES_SOURCES src/latte.c)
     add_executable(test_machines tests/test_machines.c ${TEST_MACHINES_SOURCES})
     target_include_directories(test_machines PRIVATE include src vendor/cjson
-        ${LIBSODIUM_INCLUDE_DIRS} ${LIBCURL_INCLUDE_DIRS})
-    target_link_libraries(test_machines PRIVATE cjson ${LIBSODIUM_LIBRARIES} ${LIBCURL_LIBRARIES})
+        ${LIBCURL_INCLUDE_DIRS})
+    target_link_libraries(test_machines PRIVATE cjson monocypher ${LIBCURL_LIBRARIES})
     add_test(NAME machines COMMAND test_machines)
 endif()
 

@@ -2,7 +2,6 @@
  * Runs every case in testdata/machine_id.json through ll_machine_id_hash,
  * the function applied to both the OS machine ID and a caller-supplied one.
  */
-#include <sodium.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,7 +26,6 @@ static char *read_file(const char *path)
 int main(void)
 {
     printf("=== test_machine_id ===\n");
-    if (sodium_init() < 0) return 1;
 
     char *data = read_file("testdata/machine_id.json");
     if (!data) { printf("  FAIL  cannot read testdata/machine_id.json\n"); return 1; }
