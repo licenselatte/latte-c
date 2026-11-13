@@ -3,7 +3,7 @@
 
 /*
  * ll_http_post:
- *   POSTs body to url as application/json, with a LATTE_HTTP_TIMEOUT_SECS
+ *   POSTs body to url as application/json, with a LATTE_HTTP_TIMEOUT_MS
  *   budget for the whole exchange. Returns 0 with the HTTP status in *status
  *   and the NUL-terminated answer in *response (heap-allocated, caller frees;
  *   NULL when the answer is empty), or -1 on a transport failure, with

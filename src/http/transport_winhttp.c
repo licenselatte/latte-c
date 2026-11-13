@@ -94,7 +94,7 @@ int ll_http_post(const char *url, const char *body, long *status, char **respons
     wchar_t *wurl = NULL, host[1024];
     size_t len = 0;
     HINTERNET ses = NULL, con = NULL, req = NULL;
-    ULONGLONG deadline = GetTickCount64() + (ULONGLONG)LATTE_HTTP_TIMEOUT_SECS * 1000;
+    ULONGLONG deadline = GetTickCount64() + (ULONGLONG)LATTE_HTTP_TIMEOUT_MS;
     completion *c = (completion *)calloc(1, sizeof(completion));
 
     *status = 0;

@@ -334,3 +334,14 @@ add_test(NAME ed25519 COMMAND test_ed25519 WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 add_executable(test_hmac_sha256 tests/test_hmac_sha256.c src/crypto/hmac_sha256.c)
 target_include_directories(test_hmac_sha256 PRIVATE include src)
 add_test(NAME hmac_sha256 COMMAND test_hmac_sha256)
+
+# test_transport_stress: hundreds of requests cancelled by a 200 ms deadline
+# in every phase, from several threads.
+add_executable(test_transport_stress tests/test_transport_stress.c ${LATTE_TRANSPORT} src/thread.c)
+target_include_directories(test_transport_stress PRIVATE include src)
+target_compile_definitions(test_transport_stress PRIVATE LATTE_HTTP_TIMEOUT_MS=200)
+target_link_libraries(test_transport_stress PRIVATE ${LATTE_SYSTEM_LIBS})
+if(WIN32)
+    target_link_libraries(test_transport_stress PRIVATE ws2_32)
+endif()
+add_test(NAME transport_stress COMMAND test_transport_stress)

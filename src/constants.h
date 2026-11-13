@@ -51,8 +51,11 @@
 #define LATTE_TYPE_PERPETUAL       "perpetual"
 #define LATTE_TYPE_EXPIRING        "expiring"
 
-/* HTTP timeout for activate/renew calls (seconds) */
-#define LATTE_HTTP_TIMEOUT_SECS  10L
+/* Budget for one API request, in milliseconds. Tests build the transport
+ * with a shorter one. */
+#ifndef LATTE_HTTP_TIMEOUT_MS
+#define LATTE_HTTP_TIMEOUT_MS    10000L
+#endif
 
 /* Ed25519 public key size in bytes */
 #define LATTE_ED25519_PUBKEY_SIZE 32
