@@ -317,3 +317,14 @@ if(NOT WIN32)
     target_link_libraries(test_machines PRIVATE cjson monocypher ${LATTE_SYSTEM_LIBS})
     add_test(NAME machines COMMAND test_machines)
 endif()
+
+# test_ed25519: RFC 8032, Wycheproof and ed25519-speccheck vectors (tests/vectors/).
+add_executable(test_ed25519 tests/test_ed25519.c src/crypto/ed25519.c)
+target_include_directories(test_ed25519 PRIVATE include src vendor/cjson)
+target_link_libraries(test_ed25519 PRIVATE cjson monocypher)
+add_test(NAME ed25519 COMMAND test_ed25519 WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# test_hmac_sha256: RFC 4231 test cases.
+add_executable(test_hmac_sha256 tests/test_hmac_sha256.c src/crypto/hmac_sha256.c)
+target_include_directories(test_hmac_sha256 PRIVATE include src)
+add_test(NAME hmac_sha256 COMMAND test_hmac_sha256)
