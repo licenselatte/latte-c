@@ -16,7 +16,10 @@ for name in $(echo "$dump" | sed -n 's/^[[:space:]]*DLL Name: //p'); do
     esac
 done
 
-exports=$(echo "$dump" | sed -n 's/^[[:space:]]*\[[[:space:]]*[0-9]*\][[:space:]]*//p')
+# The name is the last field of each row of the "[Ordinal/Name Pointer] Table".
+exports=$(echo "$dump" | awk '/^\[Ordinal\/Name Pointer\] Table/ { t = 1; next }
+                             t && /^[[:space:]]*$/ { t = 0 }
+                             t && /\[/ { print $NF }')
 [ -n "$exports" ] || { echo "no exports found"; rc=1; }
 for sym in $exports; do
     case $sym in

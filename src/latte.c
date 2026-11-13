@@ -407,7 +407,7 @@ latte_status latte_new(const latte_config *config, latte_sdk **out)
     if (path_ok < 0) {
         free(sdk); return LATTE_ERR_STORAGE_INIT_FAILED;
     }
-    strncpy(sdk->store_path, store_path, sizeof(sdk->store_path) - 1);
+    snprintf(sdk->store_path, sizeof(sdk->store_path), "%s", store_path);
 
     /* Machine fingerprint: HMAC-SHA256(key=raw machine ID, msg="licenselatte_"+AppID) */
     int mid_rc = config->machine_id
