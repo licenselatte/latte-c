@@ -49,9 +49,13 @@ int ll_http_post(const char *url, const char *body, long *status, char **respons
 
     ses = WinHttpOpen(NULL, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                       WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-    if (!ses)
+    if (!ses) {
+        /* Before Windows 8.1: no automatic proxy, and TLS 1.2 is off by default. */
+        DWORD tls12 = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2;
         ses = WinHttpOpen(NULL, WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                           WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+        if (ses) WinHttpSetOption(ses, WINHTTP_OPTION_SECURE_PROTOCOLS, &tls12, sizeof(tls12));
+    }
     if (!ses) goto done;
     con = WinHttpConnect(ses, host, uc.nPort, 0);
     if (!con) goto done;
@@ -72,6 +76,8 @@ int ll_http_post(const char *url, const char *body, long *status, char **respons
                              WINHTTP_HEADER_NAME_BY_INDEX, &code, &code_size,
                              WINHTTP_NO_HEADER_INDEX))
         goto done;
+    /* A proxy wanting credentials never reached the API: a transport failure, as with libcurl. */
+    if (code == 407) goto done;
 
     for (;;) {
         char *tmp = (char *)realloc(buf, len + READ_CHUNK + 1);

@@ -125,7 +125,7 @@ No preprocessor define is needed in either case. The static libraries export not
 
 ### Network behaviour
 
-Requests go through WinHTTP with the system certificate store and full certificate validation. The proxy comes from the system settings (WinHTTP automatic proxy on Windows 8.1 and later, the WinHTTP default configuration before that); the `HTTPS_PROXY` / `NO_PROXY` environment variables used by libcurl on other platforms are ignored. WinHTTP has no overall timeout, so each step (name resolution, connection, sending, each read) is limited to what remains of the same 10-second budget libcurl applies to the whole request; one stalled `WinHttpSendRequest` can still take up to about 30 seconds before it fails. WinHTTP follows redirects but refuses one from `https` to `http`.
+Requests go through WinHTTP with the system certificate store and full certificate validation. The proxy comes from the system settings (WinHTTP automatic proxy on Windows 8.1 and later, the WinHTTP default configuration before that); the `HTTPS_PROXY` / `NO_PROXY` environment variables used by libcurl on other platforms are ignored. WinHTTP has no overall timeout, so each step (name resolution, connection, sending, each read) is limited to what remains of the same 10-second budget libcurl applies to the whole request; a request that stalls in several steps can take a few times that before it fails, and proxy auto-discovery is not counted. A proxy that asks for credentials is reported as a network error, as with libcurl. WinHTTP follows redirects but refuses one from `https` to `http`.
 
 ### Building from source with MSVC
 

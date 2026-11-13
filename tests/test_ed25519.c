@@ -255,6 +255,22 @@ int main(void)
 
     test_rfc8032();
 
+    /* y >= p = 2^255 - 19 is a non-canonical encoding even of a point that is
+     * not of small order; p + 2 .. p + 18 must all be refused, p - 3 is fine. */
+    {
+        unsigned char p[32];
+        int all = 1;
+        memset(p, 0xff, 32);
+        p[31] = 0x7f;
+        for (int y = 2; y <= 18; y++) {
+            p[0] = (unsigned char)(0xed + y);
+            all = all && !ll_ed25519_point_ok(p);
+        }
+        check(all, "point_ok", "non-canonical encodings y = p + 2 .. p + 18 are refused");
+        p[0] = 0xea;
+        check(ll_ed25519_point_ok(p), "point_ok", "y = p - 3 is canonical");
+    }
+
     cJSON *wycheproof = load_json("tests/vectors/wycheproof_ed25519_test.json");
     test_wycheproof(wycheproof);
     cJSON_Delete(wycheproof);

@@ -53,7 +53,9 @@ $ignore = '^\?\?_C@', '^_{1,2}(real|xmm|ymm|zmm)@', '^_{0,2}pobj', '^\.'
 # "pick any" copy into every object that calls one, so they cannot clash either.
 $crtInline = '__local_stdio_printf_options', '__local_stdio_scanf_options',
     'printf', 'fprintf', 'sprintf', 'snprintf', '_snprintf', 'vsnprintf', 'vsprintf', 'sscanf', 'fscanf',
-    '_vfprintf_l', '_vsnprintf_l', '_vsprintf_l', '_vsnprintf', '_vsscanf_l', '_vfscanf_l'
+    '_vfprintf_l', '_vsnprintf_l', '_vsprintf_l', '_vsnprintf', '_vsscanf_l', '_vfscanf_l',
+    # Same for the UCRT time.h wrappers around the _time64 family.
+    'time', 'ctime', 'difftime', 'gmtime', 'localtime', 'mktime', '_mkgmtime', 'timespec_get'
 foreach ($lib in 'latte_mt.lib', 'latte_md.lib') {
     $path = Join-Path $Dir "lib\static\$lib"
     $count = 0

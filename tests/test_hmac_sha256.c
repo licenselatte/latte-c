@@ -91,6 +91,32 @@ int main(void)
         free(want);
     }
 
+    /* Block boundaries RFC 4231 misses: keys of 63, 64, 65 and 200 bytes,
+     * messages ending at the padding edges. Key byte i is 7i+1, message byte
+     * i is 13i+5 (mod 256); expected MACs from Python's hmac module. */
+    static const struct { size_t key_len, msg_len; const char *mac; } edges[] = {
+        {64, 55, "34b579f0c1dac0756e7e574901720c25f867f600143de92a8d762a4bb5981ed3"},
+        {64, 56, "3da1c57165d1cb95221c14d2381f86de1aa213809fde9446e2b9d40e39df70f5"},
+        {65, 63, "38bc50c7bdde6e8d4b7c6f42e6e14526f7c76f6eeb6ae435e4626fe3ae2e1d1a"},
+        {65, 64, "686c47845e64df78d4c10afb95c324b78a3424f696eb90a7d9a3700c7275c4ef"},
+        {63, 119, "194c743584379a5e372827b2e5ecaf29d4509646ee08fbb9c3791de6c4eaaccf"},
+        {0, 120, "429fda592edbf5806f1bebf98b14face8ec2da525f0eb1a7ce3bda7f7c5357c7"},
+        {200, 0, "1f26b41a7acaba4ad7b69d99c769fb1165df09acd3931132548bd97aeef712d6"},
+    };
+    for (size_t i = 0; i < sizeof(edges) / sizeof(edges[0]); i++) {
+        unsigned char key[200], msg[120], got[32];
+        for (size_t j = 0; j < edges[i].key_len; j++) key[j] = (unsigned char)(j * 7 + 1);
+        for (size_t j = 0; j < edges[i].msg_len; j++) msg[j] = (unsigned char)(j * 13 + 5);
+        ll_hmac_sha256(key, edges[i].key_len, msg, edges[i].msg_len, got);
+        size_t want_len = 0;
+        unsigned char *want = hex_dup(edges[i].mac, &want_len);
+        char name[64];
+        snprintf(name, sizeof(name), "key %zu bytes, message %zu bytes",
+                 edges[i].key_len, edges[i].msg_len);
+        CHECK(want && want_len == 32 && memcmp(got, want, 32) == 0, name);
+        free(want);
+    }
+
     printf("%d passed, %d failed\n", pass, fail);
     return fail ? 1 : 0;
 }
