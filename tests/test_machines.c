@@ -6,15 +6,25 @@
  * stub and at a cache file of its own. The cached token is not a valid
  * licence: these calls read its claims without verifying them.
  */
+/* Winsock must come before windows.h, which latte.c pulls in. */
+#ifdef _WIN32
+#  include <winsock2.h>
+#  include <ws2tcpip.h>
+typedef SOCKET sock_t;
+#  define sock_close closesocket
+#else
+#  include <arpa/inet.h>
+#  include <netinet/in.h>
+#  include <signal.h>
+#  include <sys/socket.h>
+#  include <unistd.h>
+typedef int sock_t;
+#  define sock_close close
+#endif
+
 #include "../src/latte.c"
 
 #include "sign.h"
-
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <signal.h>
-#include <sys/socket.h>
-#include <sys/wait.h>
 
 #define STORE "test_machines.latte"
 /* {"aid":"act-1","sub":"KEY1"} */
@@ -29,68 +39,80 @@ static int pass = 0, fail = 0;
     } while(0)
 
 typedef struct {
-    pid_t pid;
-    int   request_fd;
-    char  url[64];
-    char  request[8192];
+    ll_thread          thread;
+    sock_t             listener;
+    struct sockaddr_in addr;
+    int                status;
+    const char        *body;
+    char               url[64];
+    char               request[8192];
 } stub;
 
-/* Forks a child that answers one request with status and body, and passes
- * the raw request it received back through a pipe for stub_wait. */
+/* Takes one connection, keeps the raw request in st->request and answers it
+ * with st->status and st->body. A connection that closes without sending
+ * anything gets no answer. */
+static void *stub_serve(void *arg)
+{
+    stub *st = (stub *)arg;
+    sock_t c = accept(st->listener, NULL, NULL);
+    size_t n = 0;
+    for (;;) {
+        int r = (int)recv(c, st->request + n, (int)(sizeof(st->request) - 1 - n), 0);
+        if (r <= 0) break;
+        n += (size_t)r;
+        st->request[n] = '\0';
+        char *end = strstr(st->request, "\r\n\r\n");
+        char *cl  = strstr(st->request, "Content-Length: ");
+        if (end && cl && n >= (size_t)(end + 4 - st->request) + strtoul(cl + 16, NULL, 10)) break;
+    }
+    st->request[n] = '\0';
+    if (n) {
+        char resp[8192];
+        int len = snprintf(resp, sizeof(resp),
+                           "HTTP/1.1 %d Stub\r\nContent-Type: application/json\r\n"
+                           "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                           st->status, strlen(st->body), st->body);
+        send(c, resp, len, 0);
+    }
+    sock_close(c);
+    return NULL;
+}
+
+/* Starts a thread that answers one request with status and body (which must
+ * outlive stub_wait). */
 static void stub_start(stub *st, int status, const char *body)
 {
-    int ls = socket(AF_INET, SOCK_STREAM, 0);
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    socklen_t len = sizeof(addr);
-    if (bind(ls, (struct sockaddr *)&addr, sizeof(addr)) < 0 || listen(ls, 1) < 0 ||
-        getsockname(ls, (struct sockaddr *)&addr, &len) < 0) {
+    st->status = status;
+    st->body = body;
+    st->listener = socket(AF_INET, SOCK_STREAM, 0);
+    memset(&st->addr, 0, sizeof(st->addr));
+    st->addr.sin_family = AF_INET;
+    st->addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t len = (socklen_t)sizeof(st->addr);
+    if (bind(st->listener, (struct sockaddr *)&st->addr, (int)sizeof(st->addr)) < 0 ||
+        listen(st->listener, 1) < 0 ||
+        getsockname(st->listener, (struct sockaddr *)&st->addr, &len) < 0 ||
+        ll_thread_spawn(&st->thread, stub_serve, st) != 0) {
         perror("stub");
         exit(2);
     }
-    snprintf(st->url, sizeof(st->url), "http://127.0.0.1:%d", ntohs(addr.sin_port));
-
-    int fds[2];
-    if (pipe(fds) < 0) { perror("pipe"); exit(2); }
-    st->pid = fork();
-    if (st->pid == 0) {
-        close(fds[0]);
-        int c = accept(ls, NULL, NULL);
-        char req[8192];
-        size_t n = 0;
-        for (;;) {
-            ssize_t r = read(c, req + n, sizeof(req) - 1 - n);
-            if (r <= 0) break;
-            n += (size_t)r;
-            req[n] = '\0';
-            char *end = strstr(req, "\r\n\r\n");
-            char *cl  = strstr(req, "Content-Length: ");
-            if (end && cl && n >= (size_t)(end + 4 - req) + strtoul(cl + 16, NULL, 10)) break;
-        }
-        if (write(fds[1], req, n) < 0) _exit(1);
-        dprintf(c, "HTTP/1.1 %d Stub\r\nContent-Type: application/json\r\n"
-                   "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",
-                status, strlen(body), body);
-        close(c);
-        _exit(0);
-    }
-    close(ls);
-    close(fds[1]);
-    st->request_fd = fds[0];
+    snprintf(st->url, sizeof(st->url), "http://127.0.0.1:%d", ntohs(st->addr.sin_port));
 }
 
-/* Collects the request the stub received and reaps it. Returns its body. */
+/* Ends a stub no request will reach: it sees a connection that closes at once. */
+static void stub_stop(stub *st)
+{
+    sock_t c = socket(AF_INET, SOCK_STREAM, 0);
+    connect(c, (struct sockaddr *)&st->addr, (int)sizeof(st->addr));
+    sock_close(c);
+}
+
+/* Joins the stub and closes its port. Returns the body of the request it
+ * received, NULL when it received none. */
 static cJSON *stub_wait(stub *st)
 {
-    size_t n = 0;
-    ssize_t r;
-    while ((r = read(st->request_fd, st->request + n, sizeof(st->request) - 1 - n)) > 0)
-        n += (size_t)r;
-    st->request[n] = '\0';
-    close(st->request_fd);
-    waitpid(st->pid, NULL, 0);
+    ll_thread_join(&st->thread);
+    sock_close(st->listener);
     char *body = strstr(st->request, "\r\n\r\n");
     return body ? cJSON_Parse(body + 4) : NULL;
 }
@@ -247,7 +269,7 @@ static int check_and_renew(stub *st, latte_sdk *sdk, latte_status *first)
     latte_check(sdk, &lic);
     latte_license_free(lic);
     ll_thread_join(&sdk->renew_thread);
-    kill(st->pid, SIGKILL);
+    stub_stop(st);
     cJSON_Delete(stub_wait(st));
     return strncmp(st->request, "POST /v1/renew ", 15) == 0;
 }
@@ -367,7 +389,7 @@ static void test_deactivate(void)
 
     /* A port nothing listens on: bound, then closed. */
     stub_start(&st, 200, "{}");
-    kill(st.pid, SIGKILL);
+    stub_stop(&st);
     stub_wait(&st);
     sdk = stub_sdk(st.url);
     s = latte_deactivate(sdk, &res);
@@ -554,7 +576,12 @@ static void test_renew_failed(void)
 int main(void)
 {
     printf("=== test_machines ===\n");
+#ifdef _WIN32
+    WSADATA wsa;
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+#else
     signal(SIGPIPE, SIG_IGN);
+#endif
     test_deactivate();
     test_machines_and_rename();
     test_renew_errors();
