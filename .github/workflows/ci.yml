@@ -90,17 +90,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { arch: x64, platform: x64, msvc: x64, os: windows-latest }
-          - { arch: x86, platform: Win32, msvc: x86, os: windows-latest }
-          - { arch: arm64, platform: ARM64, msvc: arm64, os: windows-11-arm }
+          - { arch: x64, platform: x64, msvc: x64, os: windows-latest, license: LATTE_TEST_LICENSE_KEY_X64 }
+          - { arch: x86, platform: Win32, msvc: x86, os: windows-latest, license: LATTE_TEST_LICENSE_KEY_X86 }
+          - { arch: arm64, platform: ARM64, msvc: arm64, os: windows-11-arm, license: LATTE_TEST_LICENSE_KEY_ARM64 }
     runs-on: ${{ matrix.os }}
     # One live run per arch at a time: each arch reuses one activation.
     concurrency:
       group: windows-https-${{ matrix.arch }}
       cancel-in-progress: false
+    # Each arch has its own licence, so one arch's deactivation cooldown does not block the others.
     # Only whether the secrets exist; their values reach the live step alone.
     env:
-      HAS_TEST_SECRETS: ${{ secrets.LATTE_TEST_PUBLISHABLE_KEY != '' && secrets.LATTE_TEST_LICENSE_KEY != '' }}
+      HAS_TEST_SECRETS: ${{ secrets.LATTE_TEST_PUBLISHABLE_KEY != '' && secrets[matrix.license] != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
@@ -118,12 +119,12 @@ jobs:
         if: env.HAS_TEST_SECRETS == 'true'
         env:
           LATTE_TEST_PUBLISHABLE_KEY: ${{ secrets.LATTE_TEST_PUBLISHABLE_KEY }}
-          LATTE_TEST_LICENSE_KEY: ${{ secrets.LATTE_TEST_LICENSE_KEY }}
+          LATTE_TEST_LICENSE_KEY: ${{ secrets[matrix.license] }}
         run: build\Release\https_check.exe --live "%LATTE_TEST_PUBLISHABLE_KEY%" "%LATTE_TEST_LICENSE_KEY%" "latte-c-ci-windows-${{ matrix.arch }}"
         shell: cmd
       - name: Live check skipped
         if: env.HAS_TEST_SECRETS != 'true'
-        run: echo "::notice::LATTE_TEST_PUBLISHABLE_KEY / LATTE_TEST_LICENSE_KEY are not set; activate, renew and deactivate were not run on ${{ matrix.arch }}."
+        run: echo "::notice::LATTE_TEST_PUBLISHABLE_KEY / ${{ matrix.license }} are not set; activate, renew and deactivate were not run on ${{ matrix.arch }}."
         shell: bash
 
   # AddressSanitizer over the whole suite, test_machines (slow stub) and
