@@ -85,23 +85,20 @@ jobs:
   # WinHTTP against real TLS: the API and a TLS 1.2 host (handshake,
   # certificate), hosts with bad certificates or TLS 1.0/1.1 (must fail), and with the test secrets a full activate, renew
   # and deactivate. Without the secrets that last step is skipped.
+  # Each run issues its own licence and revokes it afterwards: the deactivation cooldown counts a licence's earlier
+  # releases, so only a licence never released before can be released on every run.
   windows-https:
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { arch: x64, platform: x64, msvc: x64, os: windows-latest, license: LATTE_TEST_LICENSE_KEY_X64 }
-          - { arch: x86, platform: Win32, msvc: x86, os: windows-latest, license: LATTE_TEST_LICENSE_KEY_X86 }
-          - { arch: arm64, platform: ARM64, msvc: arm64, os: windows-11-arm, license: LATTE_TEST_LICENSE_KEY_ARM64 }
+          - { arch: x64, platform: x64, msvc: x64, os: windows-latest }
+          - { arch: x86, platform: Win32, msvc: x86, os: windows-latest }
+          - { arch: arm64, platform: ARM64, msvc: arm64, os: windows-11-arm }
     runs-on: ${{ matrix.os }}
-    # One live run per arch at a time: each arch reuses one activation.
-    concurrency:
-      group: windows-https-${{ matrix.arch }}
-      cancel-in-progress: false
-    # Each arch has its own licence, so one arch's deactivation cooldown does not block the others.
-    # Only whether the secrets exist; their values reach the live step alone.
+    # Only whether the secrets exist; their values reach only the steps that use them.
     env:
-      HAS_TEST_SECRETS: ${{ secrets.LATTE_TEST_PUBLISHABLE_KEY != '' && secrets[matrix.license] != '' }}
+      HAS_TEST_SECRETS: ${{ secrets.LATTE_TEST_PUBLISHABLE_KEY != '' && secrets.LATTE_TEST_API_KEY != '' && secrets.LATTE_TEST_POLICY_ID != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
@@ -115,16 +112,38 @@ jobs:
           if %errorlevel% neq 0 exit /b 1
           build\Release\https_check.exe --reject https://expired.badssl.com/ https://wrong.host.badssl.com/ https://self-signed.badssl.com/ https://untrusted-root.badssl.com/ https://tls-v1-0.badssl.com:1010/ https://tls-v1-1.badssl.com:1011/
         shell: cmd
-      - name: Activate, renew and deactivate
+      - name: Issue a licence for this run
+        id: licence
         if: env.HAS_TEST_SECRETS == 'true'
         env:
+          LATTE_TEST_API_KEY: ${{ secrets.LATTE_TEST_API_KEY }}
+          LATTE_TEST_POLICY_ID: ${{ secrets.LATTE_TEST_POLICY_ID }}
+        run: |
+          $body = @{ policy_id = $env:LATTE_TEST_POLICY_ID; metadata = @{ ci = "latte-c ${{ github.run_id }} ${{ matrix.arch }}" } } | ConvertTo-Json
+          $lic = Invoke-RestMethod -Method Post -Uri https://api.licenselatte.com/v1/licenses `
+            -Headers @{ Authorization = "Bearer $env:LATTE_TEST_API_KEY" } -ContentType application/json -Body $body
+          Write-Output "::add-mask::$($lic.license_key)"
+          "key=$($lic.license_key)" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+      - name: Activate, renew and deactivate
+        if: steps.licence.outputs.key != ''
+        env:
           LATTE_TEST_PUBLISHABLE_KEY: ${{ secrets.LATTE_TEST_PUBLISHABLE_KEY }}
-          LATTE_TEST_LICENSE_KEY: ${{ secrets[matrix.license] }}
+          LATTE_TEST_LICENSE_KEY: ${{ steps.licence.outputs.key }}
         run: build\Release\https_check.exe --live "%LATTE_TEST_PUBLISHABLE_KEY%" "%LATTE_TEST_LICENSE_KEY%" "latte-c-ci-windows-${{ matrix.arch }}"
         shell: cmd
+      - name: Revoke the licence
+        if: always() && steps.licence.outputs.key != ''
+        env:
+          LATTE_TEST_API_KEY: ${{ secrets.LATTE_TEST_API_KEY }}
+          LATTE_TEST_LICENSE_KEY: ${{ steps.licence.outputs.key }}
+        run: |
+          Invoke-RestMethod -Method Delete -Uri "https://api.licenselatte.com/v1/licenses/$env:LATTE_TEST_LICENSE_KEY" `
+            -Headers @{ Authorization = "Bearer $env:LATTE_TEST_API_KEY" }
+        shell: pwsh
       - name: Live check skipped
         if: env.HAS_TEST_SECRETS != 'true'
-        run: echo "::notice::LATTE_TEST_PUBLISHABLE_KEY / ${{ matrix.license }} are not set; activate, renew and deactivate were not run on ${{ matrix.arch }}."
+        run: echo "::notice::LATTE_TEST_PUBLISHABLE_KEY / LATTE_TEST_API_KEY / LATTE_TEST_POLICY_ID are not set; activate, renew and deactivate were not run on ${{ matrix.arch }}."
         shell: bash
 
   # AddressSanitizer over the whole suite, test_machines (slow stub) and
