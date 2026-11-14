@@ -582,10 +582,12 @@ latte_status latte_deactivate(latte_sdk *sdk, latte_deactivate_result *out)
     /* Under renew_mu: an in-flight renewal saves only while the cache still
      * holds its activation, so it cannot write a token back after this. */
     ll_mutex_lock(&sdk->renew_mu);
-    ll_file_save_token(sdk->store_path, "", NULL);
+    int cleared = ll_file_save_token(sdk->store_path, "", NULL) == 0;
     sdk->renew_failed = 0;
     ll_mutex_unlock(&sdk->renew_mu);
-    return LATTE_OK;
+    /* The seat is released either way; a retry finds it released and only
+     * clears the cache. */
+    return cleared ? LATTE_OK : LATTE_ERR_STORAGE_INIT_FAILED;
 }
 
 latte_status latte_machines(latte_sdk *sdk, latte_machine **out, size_t *count)

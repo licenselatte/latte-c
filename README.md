@@ -496,6 +496,8 @@ Releases this machine's seat so the licence can be activated on another machine:
 
 The activation id and licence key come from the cached token, read without verifying it, so a machine whose token has expired can still release its seat; with no cached token the call returns `LATTE_ERR_NOT_ACTIVATED`. A machine that is lost, dead or wiped cannot call this: its seat is released from the seller's customer portal instead.
 
+If the server released the seat but the cached token could not be deleted, the call returns `LATTE_ERR_STORAGE_INIT_FAILED`; calling it again finds the seat already released and deletes the token.
+
 Releases are limited on every plan: a fixed number per licence per year, or on plans with the deactivation policy engine the seller's cooldown and yearly cap. A refusal returns `LATTE_ERR_DEACTIVATION_BLOCKED` with `reason`, `message` and `available_at` filled in. The seller may also hold the freed seat until this machine's last token has expired, which `seat_free_at` reports.
 
 ```c
@@ -822,6 +824,8 @@ When `multi_instance` is set via `latte_config_set_multi_instance()`, the OS-wid
 The storage format is compatible with the `latte-go` SDK — tokens activated by one SDK can be read by the other.
 
 `latte_deactivate` empties this file once the server has released the seat, and leaves it untouched when the release fails.
+
+Every save writes a temporary file beside the cache and renames it over the cache, so a reader never sees a partial file. On Windows the SDK opens the cache with `FILE_SHARE_DELETE` and renames with POSIX semantics (Windows 10 1607 and later, NTFS), so instances in other threads or processes that are reading the cache do not block a save. A program that holds the file open without delete sharing, such as a virus scanner, does block it; the save retries for about a quarter of a second.
 
 ---
 

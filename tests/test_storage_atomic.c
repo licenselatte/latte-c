@@ -3,11 +3,16 @@
  * records of very different sizes, a concurrent load sees one whole record
  * (never empty, truncated or interleaved) and no temp files are left behind.
  */
-#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
+#if defined(_WIN32)
+#  include <windows.h>
+#  include <direct.h>
+#else
+#  include <dirent.h>
+#  include <unistd.h>
+#endif
 
 #include "../src/storage/file.h"
 #include "../src/domain.h"
@@ -72,9 +77,17 @@ int main(void)
 {
     printf("=== test_storage_atomic ===\n");
 
+#if defined(_WIN32)
+    char dir[MAX_PATH + 32];
+    DWORD dn = GetTempPathA(MAX_PATH, dir);
+    snprintf(dir + dn, sizeof(dir) - dn, "latte_atomic_%lu", (unsigned long)GetCurrentProcessId());
+    if (_mkdir(dir) != 0) { perror("_mkdir"); return 1; }
+    snprintf(path, sizeof(path), "%s\\cache.latte", dir);
+#else
     char dir[] = "/tmp/latte_atomicXXXXXX";
     if (!mkdtemp(dir)) { perror("mkdtemp"); return 1; }
     snprintf(path, sizeof(path), "%s/cache.latte", dir);
+#endif
 
     payload[0] = strdup("small");
     payload[1] = malloc(BIG + 1);
@@ -106,15 +119,30 @@ int main(void)
     ll_cert_chain_free(chain);
 
     int leftovers = 0;
+#if defined(_WIN32)
+    char pattern[MAX_PATH + 64];
+    snprintf(pattern, sizeof(pattern), "%s\\*", dir);
+    WIN32_FIND_DATAA fd;
+    HANDLE d = FindFirstFileA(pattern, &fd);
+    for (BOOL more = d != INVALID_HANDLE_VALUE; more; more = FindNextFileA(d, &fd))
+        if (strcmp(fd.cFileName, ".") && strcmp(fd.cFileName, "..") && strcmp(fd.cFileName, "cache.latte"))
+            leftovers++;
+    if (d != INVALID_HANDLE_VALUE) FindClose(d);
+#else
     DIR *d = opendir(dir);
     for (struct dirent *e = d ? readdir(d) : NULL; e; e = readdir(d))
         if (strcmp(e->d_name, ".") && strcmp(e->d_name, "..") && strcmp(e->d_name, "cache.latte"))
             leftovers++;
     if (d) closedir(d);
+#endif
     CHECK(leftovers == 0, "no temp files left behind");
 
-    unlink(path);
+    remove(path);
+#if defined(_WIN32)
+    _rmdir(dir);
+#else
     rmdir(dir);
+#endif
     free(payload[0]);
     free(payload[1]);
 

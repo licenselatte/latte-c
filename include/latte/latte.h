@@ -355,9 +355,11 @@ typedef struct {
  *
  * The activation id and licence key come from the cached token, read
  * without verifying it, so an expired token can still release its seat.
- * Returns LATTE_ERR_NOT_ACTIVATED when there is no cached token, and
+ * Returns LATTE_ERR_NOT_ACTIVATED when there is no cached token,
  * LATTE_ERR_DEACTIVATION_BLOCKED when the seller's policy refuses the
- * release. out may be NULL.
+ * release, and LATTE_ERR_STORAGE_INIT_FAILED when the seat was released but
+ * the cached token could not be deleted; calling again deletes it. out may
+ * be NULL.
  */
 LATTE_API latte_status latte_deactivate(latte_sdk *sdk, latte_deactivate_result *out);
 
