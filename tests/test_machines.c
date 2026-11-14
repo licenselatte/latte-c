@@ -414,6 +414,38 @@ static void test_deactivate(void)
     s = latte_deactivate(sdk, &res);
     CHECK(s == LATTE_ERR_NETWORK && token_kept(), "a network failure keeps the cache");
     latte_free(sdk);
+
+    /* The seat is released but the cache cannot be cleared. */
+    stub_start(&st, 200, "{\"released\":true,\"seat_free_at\":null}");
+    sdk = stub_sdk(st.url);
+#ifdef _WIN32
+    /* A handle without delete sharing, as a virus scanner holds, blocks the save. */
+    FILE *hold = fopen(STORE, "r");
+#else
+    /* A temp name over the file system's 255-byte limit fails the save. */
+    char name[251];
+    memset(name, 'x', 250);
+    name[250] = '\0';
+    rename(STORE, name);
+    snprintf(sdk->store_path, sizeof(sdk->store_path), "%s", name);
+#endif
+    s = latte_deactivate(sdk, NULL);
+    cJSON_Delete(stub_wait(&st));
+#ifdef _WIN32
+    if (hold) fclose(hold);
+#else
+    rename(name, STORE);
+    snprintf(sdk->store_path, sizeof(sdk->store_path), "%s", STORE);
+#endif
+    CHECK(s == LATTE_ERR_STORAGE_ERROR && token_kept(),
+          "a cache that cannot be cleared is reported and kept");
+    stub_start(&st, 200, "{\"released\":false,\"seat_free_at\":null}");
+    ll_http_client_free(sdk->http);
+    sdk->http = ll_http_client_new(st.url, "pk_test_X", NULL);
+    s = latte_deactivate(sdk, NULL);
+    cJSON_Delete(stub_wait(&st));
+    CHECK(s == LATTE_OK && !token_kept(), "deactivating again clears it");
+    latte_free(sdk);
 }
 
 static void test_machines_and_rename(void)

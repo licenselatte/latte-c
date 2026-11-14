@@ -388,7 +388,7 @@ latte_config_free(cfg);
 | `LATTE_ERR_UNKNOWN_ENVIRONMENT`       | Environment field is not `live`, `test`, or `local` |
 | `LATTE_ERR_INVALID_APPID_KEY_SEGMENT` | 32-char segment has the wrong length                |
 | `LATTE_ERR_INVALID_APPID_CHECKSUM`    | Built-in checksum mismatch — likely a typo          |
-| `LATTE_ERR_STORAGE_INIT_FAILED`       | Token directory could not be created                |
+| `LATTE_ERR_STORAGE_ERROR`             | Token directory could not be created                |
 | `LATTE_ERR_MACHINE_ID_FAILED`         | OS machine UUID is unavailable (and none was set)   |
 
 #### Multiple licensed instances of the same app
@@ -495,6 +495,8 @@ latte_status latte_deactivate(latte_sdk *sdk, latte_deactivate_result *out);
 Releases this machine's seat so the licence can be activated on another machine: the "Deactivate" button in your app. It **needs the network**. The SDK asks the server to release the seat first and deletes the cached token only once the server has answered, so `latte_check` returns `LATTE_ERR_NOT_ACTIVATED` afterwards until the next `latte_activate`. If the call fails, nothing changes locally and the user can try again; the seat is never lost to a dropped connection. Repeating a release that already went through is success (`released` is 0). Times are Unix seconds; `out` may be `NULL`.
 
 The activation id and licence key come from the cached token, read without verifying it, so a machine whose token has expired can still release its seat; with no cached token the call returns `LATTE_ERR_NOT_ACTIVATED`. A machine that is lost, dead or wiped cannot call this: its seat is released from the seller's customer portal instead.
+
+If the server released the seat but the cached token could not be deleted, the call returns `LATTE_ERR_STORAGE_ERROR`; calling it again finds the seat already released and deletes the token.
 
 Releases are limited on every plan: a fixed number per licence per year, or on plans with the deactivation policy engine the seller's cooldown and yearly cap. A refusal returns `LATTE_ERR_DEACTIVATION_BLOCKED` with `reason`, `message` and `available_at` filled in. The seller may also hold the freed seat until this machine's last token has expired, which `seat_free_at` reports.
 
@@ -667,7 +669,7 @@ typedef enum {
     LATTE_ERR_UNKNOWN_ENVIRONMENT,
     LATTE_ERR_INVALID_APPID_KEY_SEGMENT,
     LATTE_ERR_INVALID_APPID_CHECKSUM,
-    LATTE_ERR_STORAGE_INIT_FAILED,
+    LATTE_ERR_STORAGE_ERROR,
     LATTE_ERR_MACHINE_ID_FAILED,
 
     /* Runtime */
@@ -681,6 +683,8 @@ typedef enum {
 ```
 
 `LATTE_ERR_DEACTIVATION_BLOCKED` is a release limit refusing a release (the licence's releases for the year used up, or the seller's cooldown); the details are in the `latte_deactivate_result` passed to `latte_deactivate`. It is appended after `LATTE_ERR_INTERNAL`, so no existing value changes.
+
+`LATTE_ERR_STORAGE_ERROR` is returned by `latte_new` when the token directory cannot be created and by `latte_deactivate` when the cached token cannot be deleted. `LATTE_ERR_STORAGE_INIT_FAILED` remains defined as the same value, so code that uses that name still compiles.
 
 ---
 
@@ -822,6 +826,8 @@ When `multi_instance` is set via `latte_config_set_multi_instance()`, the OS-wid
 The storage format is compatible with the `latte-go` SDK — tokens activated by one SDK can be read by the other.
 
 `latte_deactivate` empties this file once the server has released the seat, and leaves it untouched when the release fails.
+
+Every save writes a temporary file beside the cache and renames it over the cache, so a reader never sees a partial file. On Windows the SDK opens the cache with `FILE_SHARE_DELETE` and renames with POSIX semantics (Windows 10 1607 and later, NTFS), so instances in other threads or processes that are reading the cache do not block a save. A program that holds the file open without delete sharing, such as a virus scanner, does block it; the save retries for about a quarter of a second.
 
 ---
 
