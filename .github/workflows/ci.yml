@@ -1,0 +1,189 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Install dependencies
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get update
+            sudo apt-get install -y libcurl4-openssl-dev pkg-config
+          else
+            brew install pkgconf
+          fi
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build --parallel
+      - run: ctest --test-dir build --output-on-failure
+      - run: sh .github/scripts/check-symbols.sh build
+      # Handshake and certificate checks against real TLS endpoints: TLS 1.0
+      # and 1.1 must be refused like a bad certificate.
+      - name: TLS checks
+        run: |
+          build/https_check --accept https://api.licenselatte.com/v1/renew https://tls-v1-2.badssl.com:1012/
+          build/https_check --reject https://expired.badssl.com/ https://wrong.host.badssl.com/ https://self-signed.badssl.com/ https://untrusted-root.badssl.com/ https://tls-v1-0.badssl.com:1010/ https://tls-v1-1.badssl.com:1011/
+
+  windows-msvc:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x64, msvc: x64 }
+          - { arch: x86, msvc: x86 }
+          - { arch: arm64, msvc: amd64_arm64 }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        with:
+          arch: ${{ matrix.msvc }}
+      # Builds /MT and /MD, runs ctest, checks the layout and compiles the
+      # examples against it (x64 and x86 only; arm64 is cross-built).
+      - name: Package and check
+        shell: pwsh
+        run: .github/scripts/package-windows.ps1 -Arch ${{ matrix.arch }} -Version ci -Out "$env:RUNNER_TEMP\out"
+
+  windows-msys2:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2
+        with:
+          msystem: UCRT64
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            git
+      - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build
+      - run: ctest --test-dir build --output-on-failure
+      - run: sh .github/scripts/check-mingw.sh build/liblatte.dll
+
+  # WinHTTP against real TLS: the API and a TLS 1.2 host (handshake,
+  # certificate), hosts with bad certificates or TLS 1.0/1.1 (must fail), and with the test secrets a full activate, renew
+  # and deactivate. Without the secrets that last step is skipped.
+  # Each run issues its own licence and revokes it afterwards: the deactivation cooldown counts a licence's earlier
+  # releases, so only a licence never released before can be released on every run.
+  windows-https:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x64, platform: x64, msvc: x64, os: windows-latest }
+          - { arch: x86, platform: Win32, msvc: x86, os: windows-latest }
+          - { arch: arm64, platform: ARM64, msvc: arm64, os: windows-11-arm }
+    runs-on: ${{ matrix.os }}
+    # Only whether the secrets exist; their values reach only the steps that use them.
+    env:
+      HAS_TEST_SECRETS: ${{ secrets.LATTE_TEST_PUBLISHABLE_KEY != '' && secrets.LATTE_TEST_API_KEY != '' && secrets.LATTE_TEST_POLICY_ID != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        with:
+          arch: ${{ matrix.msvc }}
+      - run: cmake -S . -B build -A ${{ matrix.platform }} -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DLATTE_BUILD_SHARED=OFF
+      - run: cmake --build build --config Release --target https_check
+      - name: TLS handshake and certificate checks
+        run: |
+          build\Release\https_check.exe --accept https://api.licenselatte.com/v1/renew https://tls-v1-2.badssl.com:1012/
+          if %errorlevel% neq 0 exit /b 1
+          build\Release\https_check.exe --reject https://expired.badssl.com/ https://wrong.host.badssl.com/ https://self-signed.badssl.com/ https://untrusted-root.badssl.com/ https://tls-v1-0.badssl.com:1010/ https://tls-v1-1.badssl.com:1011/
+        shell: cmd
+      - name: Issue a licence for this run
+        id: licence
+        if: env.HAS_TEST_SECRETS == 'true'
+        env:
+          LATTE_TEST_API_KEY: ${{ secrets.LATTE_TEST_API_KEY }}
+          LATTE_TEST_POLICY_ID: ${{ secrets.LATTE_TEST_POLICY_ID }}
+        run: |
+          $body = @{ policy_id = $env:LATTE_TEST_POLICY_ID; metadata = @{ ci = "latte-c ${{ github.run_id }} ${{ matrix.arch }}" } } | ConvertTo-Json
+          $lic = Invoke-RestMethod -Method Post -Uri https://api.licenselatte.com/v1/licenses `
+            -Headers @{ Authorization = "Bearer $env:LATTE_TEST_API_KEY" } -ContentType application/json -Body $body
+          Write-Output "::add-mask::$($lic.license_key)"
+          "key=$($lic.license_key)" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+      - name: Activate, renew and deactivate
+        if: steps.licence.outputs.key != ''
+        env:
+          LATTE_TEST_PUBLISHABLE_KEY: ${{ secrets.LATTE_TEST_PUBLISHABLE_KEY }}
+          LATTE_TEST_LICENSE_KEY: ${{ steps.licence.outputs.key }}
+        run: build\Release\https_check.exe --live "%LATTE_TEST_PUBLISHABLE_KEY%" "%LATTE_TEST_LICENSE_KEY%" "latte-c-ci-windows-${{ matrix.arch }}"
+        shell: cmd
+      - name: Revoke the licence
+        if: always() && steps.licence.outputs.key != ''
+        env:
+          LATTE_TEST_API_KEY: ${{ secrets.LATTE_TEST_API_KEY }}
+          LATTE_TEST_LICENSE_KEY: ${{ steps.licence.outputs.key }}
+        run: |
+          Invoke-RestMethod -Method Delete -Uri "https://api.licenselatte.com/v1/licenses/$env:LATTE_TEST_LICENSE_KEY" `
+            -Headers @{ Authorization = "Bearer $env:LATTE_TEST_API_KEY" }
+        shell: pwsh
+      - name: Live check skipped
+        if: env.HAS_TEST_SECRETS != 'true'
+        run: echo "::notice::LATTE_TEST_PUBLISHABLE_KEY / LATTE_TEST_API_KEY / LATTE_TEST_POLICY_ID are not set; activate, renew and deactivate were not run on ${{ matrix.arch }}."
+        shell: bash
+
+  # AddressSanitizer over the whole suite, test_machines (slow stub) and
+  # test_transport_stress included. MSVC's ASan does not detect leaks; the
+  # stress test checks the handle count on Windows and LeakSanitizer runs in
+  # the Linux job.
+  asan-msvc:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        with:
+          arch: x64
+      # RelWithDebInfo: no /RTC (ASan rejects it) and PDBs for the reports.
+      - run: >-
+          cmake -S . -B build -A x64 -DLATTE_BUILD_SHARED=OFF
+          -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL
+          "-DCMAKE_C_FLAGS=/DWIN32 /D_WINDOWS /fsanitize=address"
+          "-DCMAKE_CXX_FLAGS=/DWIN32 /D_WINDOWS /EHsc /fsanitize=address"
+          "-DCMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO=/debug /INCREMENTAL:NO"
+      - run: cmake --build build --config RelWithDebInfo --parallel
+      - run: ctest --test-dir build -C RelWithDebInfo --output-on-failure
+        env:
+          ASAN_OPTIONS: halt_on_error=1
+
+  asan-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev pkg-config
+      - run: >-
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLATTE_BUILD_SHARED=OFF
+          "-DCMAKE_C_FLAGS=-fsanitize=address -fno-omit-frame-pointer"
+          "-DCMAKE_CXX_FLAGS=-fsanitize=address -fno-omit-frame-pointer"
+          -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address
+      - run: cmake --build build --parallel
+      - run: ctest --test-dir build --output-on-failure
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1

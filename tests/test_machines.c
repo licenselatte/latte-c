@@ -6,13 +6,32 @@
  * stub and at a cache file of its own. The cached token is not a valid
  * licence: these calls read its claims without verifying them.
  */
+/* Winsock must come before windows.h, which latte.c pulls in. */
+#ifdef _WIN32
+#  include <winsock2.h>
+#  include <ws2tcpip.h>
+typedef SOCKET sock_t;
+#  define sock_close closesocket
+#else
+#  include <arpa/inet.h>
+#  include <netinet/in.h>
+#  include <signal.h>
+#  include <sys/socket.h>
+#  include <unistd.h>
+typedef int sock_t;
+#  define sock_close close
+#endif
+
+#ifdef _WIN32
+#  define sleep_ms(ms) Sleep(ms)
+#else
+#  define sleep_ms(ms) usleep((ms) * 1000)
+#endif
+
 #include "../src/latte.c"
 
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <signal.h>
-#include <sys/socket.h>
-#include <sys/wait.h>
+#include "sign.h"
+#include "../src/http/transport.h"
 
 #define STORE "test_machines.latte"
 /* {"aid":"act-1","sub":"KEY1"} */
@@ -27,68 +46,92 @@ static int pass = 0, fail = 0;
     } while(0)
 
 typedef struct {
-    pid_t pid;
-    int   request_fd;
-    char  url[64];
-    char  request[8192];
+    ll_thread          thread;
+    sock_t             listener;
+    struct sockaddr_in addr;
+    int                status;
+    const char        *body;
+    size_t             drip_from;  /* response bytes from here on go one per 100 ms; 0 = none */
+    char               url[64];
+    char               request[8192];
 } stub;
 
-/* Forks a child that answers one request with status and body, and passes
- * the raw request it received back through a pipe for stub_wait. */
-static void stub_start(stub *st, int status, const char *body)
+/* Takes one connection, keeps the raw request in st->request and answers it
+ * with st->status and st->body. A connection that closes without sending
+ * anything gets no answer. */
+static void *stub_serve(void *arg)
 {
-    int ls = socket(AF_INET, SOCK_STREAM, 0);
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    socklen_t len = sizeof(addr);
-    if (bind(ls, (struct sockaddr *)&addr, sizeof(addr)) < 0 || listen(ls, 1) < 0 ||
-        getsockname(ls, (struct sockaddr *)&addr, &len) < 0) {
+    stub *st = (stub *)arg;
+    sock_t c = accept(st->listener, NULL, NULL);
+    size_t n = 0;
+    for (;;) {
+        int r = (int)recv(c, st->request + n, (int)(sizeof(st->request) - 1 - n), 0);
+        if (r <= 0) break;
+        n += (size_t)r;
+        st->request[n] = '\0';
+        char *end = strstr(st->request, "\r\n\r\n");
+        char *cl  = strstr(st->request, "Content-Length: ");
+        if (end && cl && n >= (size_t)(end + 4 - st->request) + strtoul(cl + 16, NULL, 10)) break;
+    }
+    st->request[n] = '\0';
+    if (n) {
+        char resp[8192];
+        int len = snprintf(resp, sizeof(resp),
+                           "HTTP/1.1 %d Stub\r\nContent-Type: application/json\r\n"
+                           "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                           st->status, strlen(st->body), st->body);
+        size_t at = st->drip_from ? st->drip_from : (size_t)len;
+        if (send(c, resp, (int)at, 0) >= 0)
+            for (; at < (size_t)len; at++) {
+                sleep_ms(100);
+                if (send(c, resp + at, 1, 0) < 0) break;
+            }
+    }
+    sock_close(c);
+    return NULL;
+}
+
+/* Starts a thread that answers one request with status and body (which must
+ * outlive stub_wait), sending it a byte at a time from drip_from on. */
+static void stub_start_drip(stub *st, int status, const char *body, size_t drip_from)
+{
+    st->status = status;
+    st->body = body;
+    st->drip_from = drip_from;
+    st->listener = socket(AF_INET, SOCK_STREAM, 0);
+    memset(&st->addr, 0, sizeof(st->addr));
+    st->addr.sin_family = AF_INET;
+    st->addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t len = (socklen_t)sizeof(st->addr);
+    if (bind(st->listener, (struct sockaddr *)&st->addr, (int)sizeof(st->addr)) < 0 ||
+        listen(st->listener, 1) < 0 ||
+        getsockname(st->listener, (struct sockaddr *)&st->addr, &len) < 0 ||
+        ll_thread_spawn(&st->thread, stub_serve, st) != 0) {
         perror("stub");
         exit(2);
     }
-    snprintf(st->url, sizeof(st->url), "http://127.0.0.1:%d", ntohs(addr.sin_port));
-
-    int fds[2];
-    if (pipe(fds) < 0) { perror("pipe"); exit(2); }
-    st->pid = fork();
-    if (st->pid == 0) {
-        close(fds[0]);
-        int c = accept(ls, NULL, NULL);
-        char req[8192];
-        size_t n = 0;
-        for (;;) {
-            ssize_t r = read(c, req + n, sizeof(req) - 1 - n);
-            if (r <= 0) break;
-            n += (size_t)r;
-            req[n] = '\0';
-            char *end = strstr(req, "\r\n\r\n");
-            char *cl  = strstr(req, "Content-Length: ");
-            if (end && cl && n >= (size_t)(end + 4 - req) + strtoul(cl + 16, NULL, 10)) break;
-        }
-        if (write(fds[1], req, n) < 0) _exit(1);
-        dprintf(c, "HTTP/1.1 %d Stub\r\nContent-Type: application/json\r\n"
-                   "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",
-                status, strlen(body), body);
-        close(c);
-        _exit(0);
-    }
-    close(ls);
-    close(fds[1]);
-    st->request_fd = fds[0];
+    snprintf(st->url, sizeof(st->url), "http://127.0.0.1:%d", ntohs(st->addr.sin_port));
 }
 
-/* Collects the request the stub received and reaps it. Returns its body. */
+static void stub_start(stub *st, int status, const char *body)
+{
+    stub_start_drip(st, status, body, 0);
+}
+
+/* Ends a stub no request will reach: it sees a connection that closes at once. */
+static void stub_stop(stub *st)
+{
+    sock_t c = socket(AF_INET, SOCK_STREAM, 0);
+    connect(c, (struct sockaddr *)&st->addr, (int)sizeof(st->addr));
+    sock_close(c);
+}
+
+/* Joins the stub and closes its port. Returns the body of the request it
+ * received, NULL when it received none. */
 static cJSON *stub_wait(stub *st)
 {
-    size_t n = 0;
-    ssize_t r;
-    while ((r = read(st->request_fd, st->request + n, sizeof(st->request) - 1 - n)) > 0)
-        n += (size_t)r;
-    st->request[n] = '\0';
-    close(st->request_fd);
-    waitpid(st->pid, NULL, 0);
+    ll_thread_join(&st->thread);
+    sock_close(st->listener);
     char *body = strstr(st->request, "\r\n\r\n");
     return body ? cJSON_Parse(body + 4) : NULL;
 }
@@ -122,16 +165,6 @@ static int token_kept(void)
     return kept;
 }
 
-typedef struct { unsigned char pk[32], sk[64]; } keypair;
-
-static char *b64url(const unsigned char *in, size_t len)
-{
-    size_t cap = sodium_base64_ENCODED_LEN(len, sodium_base64_VARIANT_URLSAFE_NO_PADDING);
-    char *out = (char *)malloc(cap);
-    sodium_bin2base64(out, cap, in, len, sodium_base64_VARIANT_URLSAFE_NO_PADDING);
-    return out;
-}
-
 static char *make_jwt(const unsigned char *sk, const char *payload)
 {
     const char *header = "{\"alg\":\"EdDSA\",\"typ\":\"JWT\"}";
@@ -139,8 +172,8 @@ static char *make_jwt(const unsigned char *sk, const char *payload)
     char *p = b64url((const unsigned char *)payload, strlen(payload));
     char msg[2048];
     snprintf(msg, sizeof(msg), "%s.%s", h, p);
-    unsigned char sig[crypto_sign_ed25519_BYTES];
-    crypto_sign_ed25519_detached(sig, NULL, (const unsigned char *)msg, strlen(msg), sk);
+    unsigned char sig[64];
+    crypto_ed25519_sign(sig, sk, (const unsigned char *)msg, strlen(msg));
     char *s = b64url(sig, sizeof(sig));
     char *jwt = (char *)malloc(strlen(msg) + strlen(s) + 2);
     sprintf(jwt, "%s.%s", msg, s);
@@ -153,7 +186,7 @@ static char *make_cert(const unsigned char *parent_sk, const char *sub, const ch
                        const unsigned char *pub, int64_t iat, int64_t exp)
 {
     char hex[65], payload[512];
-    sodium_bin2hex(hex, sizeof(hex), pub, 32);
+    hex32(pub, hex);
     snprintf(payload, sizeof(payload),
              "{\"iss\":\"licenselatte\",\"sub\":\"%s\",\"pid\":\"proj\",\"%s\":\"%s\","
              "\"iat\":%lld,\"exp\":%lld}",
@@ -167,10 +200,7 @@ static void signed_token(const keypair *master, int64_t iat, int64_t grace, int6
                          const char *machine, char **token, ll_cert_chain *chain)
 {
     int64_t now = (int64_t)time(NULL);
-    keypair sub, proj, daily;
-    crypto_sign_ed25519_keypair(sub.pk, sub.sk);
-    crypto_sign_ed25519_keypair(proj.pk, proj.sk);
-    crypto_sign_ed25519_keypair(daily.pk, daily.sk);
+    keypair sub = gen(), proj = gen(), daily = gen();
     chain->submaster = make_cert(master->sk, "submaster", "spk", sub.pk, now - 86400 * 30, now + 86400 * 100);
     chain->project   = make_cert(sub.sk, "project", "ppk", proj.pk, now - 86400 * 30, now + 86400 * 100);
     chain->daily     = make_cert(proj.sk, "daily", "dpk", daily.pk, iat - 60, daily_exp);
@@ -258,16 +288,14 @@ static int check_and_renew(stub *st, latte_sdk *sdk, latte_status *first)
     latte_check(sdk, &lic);
     latte_license_free(lic);
     ll_thread_join(&sdk->renew_thread);
-    kill(st->pid, SIGKILL);
+    stub_stop(st);
     cJSON_Delete(stub_wait(st));
     return strncmp(st->request, "POST /v1/renew ", 15) == 0;
 }
 
 static void test_renew_after_grace(void)
 {
-    keypair master, other;
-    crypto_sign_ed25519_keypair(master.pk, master.sk);
-    crypto_sign_ed25519_keypair(other.pk, other.sk);
+    keypair master = gen(), other = gen();
     latte_license *lic = NULL;
     latte_status first;
     stub st;
@@ -380,7 +408,7 @@ static void test_deactivate(void)
 
     /* A port nothing listens on: bound, then closed. */
     stub_start(&st, 200, "{}");
-    kill(st.pid, SIGKILL);
+    stub_stop(&st);
     stub_wait(&st);
     sdk = stub_sdk(st.url);
     s = latte_deactivate(sdk, &res);
@@ -519,6 +547,33 @@ static int renew_failed_after_status(int status, int before, int *kept)
     return after;
 }
 
+/* A server that sends its answer a byte at a time, from drip_from on, is cut
+ * off at the 10 s deadline: neither backend restarts it on each byte. */
+static void test_slow_server(void)
+{
+    static char body[400];
+    memset(body, 'x', sizeof(body) - 1);
+    static const struct { size_t drip_from; const char *name; } cases[] = {
+        {1, "a server dripping its status line and headers is cut off within 15 s"},
+        {120, "a server dripping its body is cut off within 15 s"},
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        stub st;
+        stub_start_drip(&st, 200, body, cases[i].drip_from);
+        char url[96];
+        snprintf(url, sizeof(url), "%s/v1/renew", st.url);
+        long status = 0;
+        char *resp = NULL;
+        time_t start = time(NULL);
+        int r = ll_http_post(url, "{}", &status, &resp);
+        long took = (long)(time(NULL) - start);
+        printf("        (gave up after %ld s)\n", took);
+        CHECK(r == -1 && resp == NULL && took >= 9 && took <= 15, cases[i].name);
+        free(resp);
+        cJSON_Delete(stub_wait(&st));
+    }
+}
+
 static void test_renew_failed(void)
 {
     int kept;
@@ -567,11 +622,17 @@ static void test_renew_failed(void)
 int main(void)
 {
     printf("=== test_machines ===\n");
+#ifdef _WIN32
+    WSADATA wsa;
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+#else
     signal(SIGPIPE, SIG_IGN);
+#endif
     test_deactivate();
     test_machines_and_rename();
     test_renew_errors();
     test_renew_failed();
+    test_slow_server();
     test_renew_after_grace();
     remove(STORE);
     printf("\n%d passed, %d failed\n", pass, fail);

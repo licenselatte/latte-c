@@ -1,7 +1,6 @@
 #include "client.h"
-#include "../constants.h"
+#include "transport.h"
 #include "../../vendor/cjson/cJSON.h"
-#include <curl/curl.h>
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,14 +12,23 @@ struct ll_http_client {
     char *machine_name;  /* sent on activation; NULL sends none */
 };
 
+static char *strdup_safe(const char *s)
+{
+    if (!s) return NULL;
+    size_t n = strlen(s) + 1;
+    char *p = (char *)malloc(n);
+    if (p) memcpy(p, s, n);
+    return p;
+}
+
 ll_http_client *ll_http_client_new(const char *base_url, const char *project_key,
                                    const char *machine_name)
 {
     ll_http_client *c = (ll_http_client *)calloc(1, sizeof(ll_http_client));
     if (!c) return NULL;
-    c->base_url    = strdup(base_url);
-    c->project_key = strdup(project_key);
-    if (machine_name && machine_name[0]) c->machine_name = strdup(machine_name);
+    c->base_url    = strdup_safe(base_url);
+    c->project_key = strdup_safe(project_key);
+    if (machine_name && machine_name[0]) c->machine_name = strdup_safe(machine_name);
     return c;
 }
 
@@ -31,34 +39,6 @@ void ll_http_client_free(ll_http_client *c)
     free(c->project_key);
     free(c->machine_name);
     free(c);
-}
-
-/* Dynamic buffer for curl write callback */
-typedef struct {
-    char  *data;
-    size_t len;
-} response_buf;
-
-static size_t write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
-{
-    size_t bytes = size * nmemb;
-    response_buf *buf = (response_buf *)userdata;
-    char *tmp = (char *)realloc(buf->data, buf->len + bytes + 1);
-    if (!tmp) return 0;
-    buf->data = tmp;
-    memcpy(buf->data + buf->len, ptr, bytes);
-    buf->len += bytes;
-    buf->data[buf->len] = '\0';
-    return bytes;
-}
-
-static char *strdup_safe(const char *s)
-{
-    if (!s) return NULL;
-    size_t n = strlen(s) + 1;
-    char *p = (char *)malloc(n);
-    if (p) memcpy(p, s, n);
-    return p;
 }
 
 /*
@@ -77,35 +57,11 @@ static ll_port_error post_json(ll_http_client *c,
     char url[1024];
     snprintf(url, sizeof(url), "%s%s", c->base_url, path);
 
-    CURL *curl = curl_easy_init();
-    if (!curl) return LL_PORT_ERR_NETWORK;
+    char *resp;
+    if (ll_http_post(url, body, status, &resp) != 0) return LL_PORT_ERR_NETWORK;
 
-    response_buf resp = {NULL, 0};
-
-    struct curl_slist *headers = NULL;
-    headers = curl_slist_append(headers, "Content-Type: application/json");
-
-    curl_easy_setopt(curl, CURLOPT_URL,            url);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS,     body);
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER,     headers);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,  write_cb);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA,      &resp);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT,        LATTE_HTTP_TIMEOUT_SECS);
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-
-    CURLcode res = curl_easy_perform(curl);
-    *status = 0;
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, status);
-    curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
-
-    if (res != CURLE_OK) {
-        free(resp.data);
-        return LL_PORT_ERR_NETWORK;
-    }
-
-    *json = resp.data ? cJSON_Parse(resp.data) : NULL;
-    free(resp.data);
+    *json = resp ? cJSON_Parse(resp) : NULL;
+    free(resp);
     return LL_PORT_OK;
 }
 

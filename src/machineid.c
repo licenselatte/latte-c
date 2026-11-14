@@ -1,6 +1,6 @@
 #include "machineid.h"
+#include "crypto/hmac_sha256.h"
 #include <ctype.h>
-#include <sodium.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -118,19 +118,18 @@ static int get_raw_machine_id(char *out, size_t out_size) {
 
 int ll_machine_id_hash(const char *raw_machine_id, const char *app_id, char *out) {
   static const char prefix[] = "licenselatte_";
-  unsigned char mac[crypto_auth_hmacsha256_BYTES];
-  crypto_auth_hmacsha256_state state;
-
-  if (crypto_auth_hmacsha256_init(&state, (const unsigned char *)raw_machine_id,
-                                  strlen(raw_machine_id)) != 0 ||
-      crypto_auth_hmacsha256_update(&state, (const unsigned char *)prefix,
-                                    sizeof(prefix) - 1) != 0 ||
-      crypto_auth_hmacsha256_update(&state, (const unsigned char *)app_id,
-                                    strlen(app_id)) != 0 ||
-      crypto_auth_hmacsha256_final(&state, mac) != 0)
+  size_t prefix_len = sizeof(prefix) - 1, app_len = strlen(app_id);
+  unsigned char mac[32];
+  unsigned char *msg = (unsigned char *)malloc(prefix_len + app_len);
+  if (!msg)
     return -1;
+  memcpy(msg, prefix, prefix_len);
+  memcpy(msg + prefix_len, app_id, app_len);
+  ll_hmac_sha256((const unsigned char *)raw_machine_id, strlen(raw_machine_id),
+                 msg, prefix_len + app_len, mac);
+  free(msg);
 
-  for (int i = 0; i < (int)crypto_auth_hmacsha256_BYTES; i++)
+  for (int i = 0; i < 32; i++)
     snprintf(out + 2 * i, 3, "%02x", mac[i]);
   out[64] = '\0';
   return 0;

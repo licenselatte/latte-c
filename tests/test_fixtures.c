@@ -9,7 +9,6 @@
  * / ll_validate_at / ll_in_grace_period_at are that seam, and this file is
  * what they exist for.
  */
-#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -349,22 +348,24 @@ int main(void)
     run_doc("testdata/anchors.json", run_anchors);
     run_doc("testdata/cache_files.json", run_cache_files);
 
-    DIR *dir = opendir(VECTORS_DIR);
-    if (!dir) {
-        printf("  cannot open %s -- did you forget to populate the submodule?\n"
+    /* manifest.json names every fixture in the directory. */
+    char *manifest_data = read_file(VECTORS_DIR "/manifest.json");
+    cJSON *manifest = manifest_data ? cJSON_Parse(manifest_data) : NULL;
+    free(manifest_data);
+    if (!cJSON_IsArray(manifest)) {
+        printf("  cannot read %s/manifest.json -- did you forget to populate the submodule?\n"
                "  (git submodule update --init)\n", VECTORS_DIR);
         return 1;
     }
 
     int ran = 0;
-    struct dirent *de;
-    while ((de = readdir(dir)) != NULL) {
-        size_t len = strlen(de->d_name);
-        if (len < 6 || strcmp(de->d_name + len - 5, ".json") != 0) continue;
-        if (strcmp(de->d_name, "manifest.json") == 0) continue;
+    const cJSON *entry;
+    cJSON_ArrayForEach(entry, manifest) {
+        const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(entry, "name"));
+        if (!name) { printf("  FAIL  manifest entry without a name\n"); fail++; continue; }
 
         char path[1024];
-        snprintf(path, sizeof path, "%s/%s", VECTORS_DIR, de->d_name);
+        snprintf(path, sizeof path, "%s/%s.json", VECTORS_DIR, name);
         char *data = read_file(path);
         if (!data) { printf("  FAIL  cannot read %s\n", path); fail++; continue; }
 
@@ -377,7 +378,7 @@ int main(void)
         cJSON_Delete(f);
         free(data);
     }
-    closedir(dir);
+    cJSON_Delete(manifest);
 
     if (ran <= 15) {
         printf("  FAIL  expected the full shared fixture set, only found %d\n", ran);

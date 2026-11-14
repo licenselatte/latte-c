@@ -18,7 +18,7 @@ int main(void)
 {
     printf("=== test_storage ===\n");
 
-    const char *path = "/tmp/latte_test_storage.latte";
+    const char *path = "latte_test_storage.latte";
 
     /* JSON round-trip */
     ll_cert_chain chain_in = {
@@ -48,7 +48,7 @@ int main(void)
     ll_cert_chain_free(chain_out);
 
     /* Legacy "timestamp:token" format */
-    const char *legacy_path = "/tmp/latte_test_legacy.latte";
+    const char *legacy_path = "latte_test_legacy.latte";
     FILE *fp = fopen(legacy_path, "w");
     if (fp) {
         fprintf(fp, "1700000000:legacy.token.value");

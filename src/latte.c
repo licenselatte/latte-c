@@ -11,7 +11,6 @@
 #include "storage/file.h"
 #include "http/client.h"
 #include "thread.h"
-#include <sodium.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -97,7 +96,7 @@ static latte_license *domain_to_public(latte_sdk *sdk, const ll_license *d)
                 pub->metadata[i].key   = strdup_safe(d->metadata_keys[i]);
                 pub->metadata[i].value = strdup_safe(d->metadata_values[i]);
             }
-            pub->metadata_count = d->metadata_count;
+            pub->metadata_count = (uint32_t)d->metadata_count;
         }
     }
 
@@ -374,8 +373,6 @@ latte_status latte_new(const latte_config *config, latte_sdk **out)
     if (config->machine_id_failed || config->machine_name_failed) return LATTE_ERR_INTERNAL;
     const char *app_id = config->app_id;
 
-    if (sodium_init() < 0) return LATTE_ERR_INTERNAL;
-
     ll_env env;
     const char *app_key = NULL;
     latte_status st = ll_parse_app_id(app_id, &env, &app_key);
@@ -410,7 +407,7 @@ latte_status latte_new(const latte_config *config, latte_sdk **out)
     if (path_ok < 0) {
         free(sdk); return LATTE_ERR_STORAGE_INIT_FAILED;
     }
-    strncpy(sdk->store_path, store_path, sizeof(sdk->store_path) - 1);
+    snprintf(sdk->store_path, sizeof(sdk->store_path), "%s", store_path);
 
     /* Machine fingerprint: HMAC-SHA256(key=raw machine ID, msg="licenselatte_"+AppID) */
     int mid_rc = config->machine_id
