@@ -29,7 +29,7 @@ const char *latte_strerror(latte_status s)
     case LATTE_ERR_UNKNOWN_ENVIRONMENT:     return "licenselatte: unknown environment";
     case LATTE_ERR_INVALID_APPID_KEY_SEGMENT: return "licenselatte: invalid app id key segment";
     case LATTE_ERR_INVALID_APPID_CHECKSUM:  return "licenselatte: invalid app id checksum";
-    case LATTE_ERR_STORAGE_INIT_FAILED:     return "licenselatte: cannot initialize storage";
+    case LATTE_ERR_STORAGE_ERROR:           return "licenselatte: storage error";
     case LATTE_ERR_MACHINE_ID_FAILED:       return "licenselatte: cannot determine machine ID";
     case LATTE_ERR_NETWORK:                 return "licenselatte: network error";
     case LATTE_ERR_SERVER_INVALID_TOKEN:    return "licenselatte: server returned invalid token";

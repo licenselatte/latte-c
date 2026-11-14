@@ -388,7 +388,7 @@ latte_config_free(cfg);
 | `LATTE_ERR_UNKNOWN_ENVIRONMENT`       | Environment field is not `live`, `test`, or `local` |
 | `LATTE_ERR_INVALID_APPID_KEY_SEGMENT` | 32-char segment has the wrong length                |
 | `LATTE_ERR_INVALID_APPID_CHECKSUM`    | Built-in checksum mismatch — likely a typo          |
-| `LATTE_ERR_STORAGE_INIT_FAILED`       | Token directory could not be created                |
+| `LATTE_ERR_STORAGE_ERROR`             | Token directory could not be created                |
 | `LATTE_ERR_MACHINE_ID_FAILED`         | OS machine UUID is unavailable (and none was set)   |
 
 #### Multiple licensed instances of the same app
@@ -496,7 +496,7 @@ Releases this machine's seat so the licence can be activated on another machine:
 
 The activation id and licence key come from the cached token, read without verifying it, so a machine whose token has expired can still release its seat; with no cached token the call returns `LATTE_ERR_NOT_ACTIVATED`. A machine that is lost, dead or wiped cannot call this: its seat is released from the seller's customer portal instead.
 
-If the server released the seat but the cached token could not be deleted, the call returns `LATTE_ERR_STORAGE_INIT_FAILED`; calling it again finds the seat already released and deletes the token.
+If the server released the seat but the cached token could not be deleted, the call returns `LATTE_ERR_STORAGE_ERROR`; calling it again finds the seat already released and deletes the token.
 
 Releases are limited on every plan: a fixed number per licence per year, or on plans with the deactivation policy engine the seller's cooldown and yearly cap. A refusal returns `LATTE_ERR_DEACTIVATION_BLOCKED` with `reason`, `message` and `available_at` filled in. The seller may also hold the freed seat until this machine's last token has expired, which `seat_free_at` reports.
 
@@ -669,7 +669,7 @@ typedef enum {
     LATTE_ERR_UNKNOWN_ENVIRONMENT,
     LATTE_ERR_INVALID_APPID_KEY_SEGMENT,
     LATTE_ERR_INVALID_APPID_CHECKSUM,
-    LATTE_ERR_STORAGE_INIT_FAILED,
+    LATTE_ERR_STORAGE_ERROR,
     LATTE_ERR_MACHINE_ID_FAILED,
 
     /* Runtime */
@@ -683,6 +683,8 @@ typedef enum {
 ```
 
 `LATTE_ERR_DEACTIVATION_BLOCKED` is a release limit refusing a release (the licence's releases for the year used up, or the seller's cooldown); the details are in the `latte_deactivate_result` passed to `latte_deactivate`. It is appended after `LATTE_ERR_INTERNAL`, so no existing value changes.
+
+`LATTE_ERR_STORAGE_ERROR` is returned by `latte_new` when the token directory cannot be created and by `latte_deactivate` when the cached token cannot be deleted. `LATTE_ERR_STORAGE_INIT_FAILED` remains defined as the same value, so code that uses that name still compiles.
 
 ---
 

@@ -437,7 +437,7 @@ static void test_deactivate(void)
     rename(name, STORE);
     snprintf(sdk->store_path, sizeof(sdk->store_path), "%s", STORE);
 #endif
-    CHECK(s == LATTE_ERR_STORAGE_INIT_FAILED && token_kept(),
+    CHECK(s == LATTE_ERR_STORAGE_ERROR && token_kept(),
           "a cache that cannot be cleared is reported and kept");
     stub_start(&st, 200, "{\"released\":false,\"seat_free_at\":null}");
     ll_http_client_free(sdk->http);

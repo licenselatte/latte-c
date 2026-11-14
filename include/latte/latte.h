@@ -41,7 +41,9 @@ typedef enum {
   LATTE_ERR_UNKNOWN_ENVIRONMENT,
   LATTE_ERR_INVALID_APPID_KEY_SEGMENT,
   LATTE_ERR_INVALID_APPID_CHECKSUM,
-  LATTE_ERR_STORAGE_INIT_FAILED,
+  /* The token directory cannot be created (latte_new) or the cached token
+   * cannot be written (latte_deactivate). */
+  LATTE_ERR_STORAGE_ERROR,
   LATTE_ERR_MACHINE_ID_FAILED,
 
   /* Runtime errors */
@@ -53,6 +55,9 @@ typedef enum {
    * The reason, message and available_at are in latte_deactivate_result. */
   LATTE_ERR_DEACTIVATION_BLOCKED
 } latte_status;
+
+/* Alias of LATTE_ERR_STORAGE_ERROR, kept so code written against it compiles. */
+#define LATTE_ERR_STORAGE_INIT_FAILED LATTE_ERR_STORAGE_ERROR
 
 /* Key-value pair for license metadata (from the pmd JWT claim). */
 typedef struct {
@@ -248,7 +253,7 @@ LATTE_API void latte_config_free(latte_config *cfg);
  *
  * Returns LATTE_ERR_INVALID_CONFIG if config or its app_id is NULL,
  *         LATTE_ERR_INVALID_APPID / _CHECKSUM if app_id is malformed,
- *         LATTE_ERR_STORAGE_INIT_FAILED if the token directory cannot be
+ *         LATTE_ERR_STORAGE_ERROR if the token directory cannot be
  * created, LATTE_ERR_MACHINE_ID_FAILED if the machine fingerprint cannot be
  * read (only when no machine ID was set with latte_config_set_machine_id()).
  */
@@ -357,7 +362,7 @@ typedef struct {
  * without verifying it, so an expired token can still release its seat.
  * Returns LATTE_ERR_NOT_ACTIVATED when there is no cached token,
  * LATTE_ERR_DEACTIVATION_BLOCKED when the seller's policy refuses the
- * release, and LATTE_ERR_STORAGE_INIT_FAILED when the seat was released but
+ * release, and LATTE_ERR_STORAGE_ERROR when the seat was released but
  * the cached token could not be deleted; calling again deletes it. out may
  * be NULL.
  */

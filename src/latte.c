@@ -405,7 +405,7 @@ latte_status latte_new(const latte_config *config, latte_sdk **out)
         ? ll_resolve_storage_path_local(sdk->app_key, store_path, sizeof(store_path))
         : ll_resolve_storage_path(sdk->app_key, store_path, sizeof(store_path));
     if (path_ok < 0) {
-        free(sdk); return LATTE_ERR_STORAGE_INIT_FAILED;
+        free(sdk); return LATTE_ERR_STORAGE_ERROR;
     }
     snprintf(sdk->store_path, sizeof(sdk->store_path), "%s", store_path);
 
@@ -587,7 +587,7 @@ latte_status latte_deactivate(latte_sdk *sdk, latte_deactivate_result *out)
     ll_mutex_unlock(&sdk->renew_mu);
     /* The seat is released either way; a retry finds it released and only
      * clears the cache. */
-    return cleared ? LATTE_OK : LATTE_ERR_STORAGE_INIT_FAILED;
+    return cleared ? LATTE_OK : LATTE_ERR_STORAGE_ERROR;
 }
 
 latte_status latte_machines(latte_sdk *sdk, latte_machine **out, size_t *count)
