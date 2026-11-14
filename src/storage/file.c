@@ -18,11 +18,19 @@ static char *read_file(const char *path)
 {
 #if defined(_WIN32)
     /* FILE_SHARE_DELETE, which fopen leaves out, lets a save replace the
-     * cache while this reads it. */
-    HANDLE h = CreateFileA(path, GENERIC_READ,
-                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                           NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (h == INVALID_HANDLE_VALUE) return NULL;
+     * cache while this reads it. A rename in progress briefly refuses the
+     * open, so sharing failures are retried as replace_file does. */
+    HANDLE h;
+    for (DWORD delay = 1; ; delay *= 2) {
+        h = CreateFileA(path, GENERIC_READ,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                        NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (h != INVALID_HANDLE_VALUE) break;
+        DWORD err = GetLastError();
+        if ((err != ERROR_ACCESS_DENIED && err != ERROR_SHARING_VIOLATION) || delay > 128)
+            return NULL;
+        Sleep(delay);
+    }
     int fd = _open_osfhandle((intptr_t)h, _O_RDONLY);
     if (fd < 0) { CloseHandle(h); return NULL; }
     FILE *fp = _fdopen(fd, "r");
