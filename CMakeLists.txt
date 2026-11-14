@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(latte-c VERSION 1.7.0
+project(latte-c VERSION 1.8.0
         DESCRIPTION "C/C++ SDK for LicenseLatte license activation and offline verification"
         HOMEPAGE_URL "https://licenselatte.com/docs/sdks/c"
         LANGUAGES C CXX)
